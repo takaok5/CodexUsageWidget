@@ -1,0 +1,5 @@
+Codex Taskbar Widget 1.0.7
+Build date: 2026-07-13
+
+Primary label: 7D
+Launcher: CodexTaskbarWidget.exe
