@@ -1,5 +1,5 @@
-Codex Taskbar Widget 1.0.7
-Build date: 2026-07-13
+ChatGPT Codex Usage Widget 1.0.8
+Build date: 2026-07-16
 
-Primary label: 7D
+Primary label: ChatGPT Codex
 Launcher: CodexTaskbarWidget.exe

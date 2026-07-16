@@ -33,14 +33,16 @@ $mutex = [Threading.Mutex]::new($true, 'CodexUsageTaskbarWidget', [ref]$created)
 if (-not $created) { return }
 
 $appDir = if ($MyInvocation.MyCommand.Path) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { $PWD.Path }
-$stateFile = Join-Path $appDir 'taskbar-state.json'
-$logFile = Join-Path $appDir 'widget-errors.log'
+$configDir = Join-Path $env:APPDATA 'CodexUsageWidget'
+New-Item -ItemType Directory -Path $configDir -Force -ErrorAction SilentlyContinue | Out-Null
+$stateFile = Join-Path $configDir 'widget-state.json'
+$logFile = Join-Path $configDir 'widget-errors.log'
 $script:lastLogMessage = ''
 
 [xml]$xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Width="235" Height="48" WindowStyle="None" AllowsTransparency="True"
+        Width="250" Height="48" WindowStyle="None" AllowsTransparency="True"
         Background="Transparent" ResizeMode="NoResize" ShowInTaskbar="False"
         Topmost="False" Focusable="False" ShowActivated="False">
   <Border x:Name="Root" Padding="7,2,7,2" Cursor="SizeWE" CornerRadius="7" BorderThickness="1">
@@ -63,6 +65,12 @@ $script:lastLogMessage = ''
         <MenuItem Header="Move to right edge"/>
         <MenuItem Header="Move to next display"/>
         <MenuItem Header="Refresh usage"/>
+        <MenuItem Header="Refresh interval">
+          <MenuItem Header="30 seconds" IsCheckable="True"/>
+          <MenuItem Header="2 minutes" IsCheckable="True"/>
+          <MenuItem Header="5 minutes" IsCheckable="True"/>
+          <MenuItem Header="Manual only" IsCheckable="True"/>
+        </MenuItem>
         <MenuItem Header="Lock position" IsCheckable="True"/>
         <MenuItem Header="Animate icon" IsCheckable="True"/>
         <MenuItem Header="Animation speed">
@@ -85,17 +93,17 @@ $script:lastLogMessage = ''
       <Grid Grid.Column="1" VerticalAlignment="Center">
         <Grid.RowDefinitions><RowDefinition Height="21"/><RowDefinition Height="21"/></Grid.RowDefinitions>
         <Grid Grid.Row="0">
-          <Grid.ColumnDefinitions><ColumnDefinition Width="52"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-          <TextBlock Text="Codex" Foreground="#FFF3F3F3" FontFamily="Segoe UI Variable Text, Segoe UI" FontWeight="SemiBold" FontSize="14" HorizontalAlignment="Left" VerticalAlignment="Center"/>
-          <TextBlock x:Name="TimeText" Grid.Column="1" Text="Reset date unavailable" Foreground="#FFC7C7C7" FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="10" HorizontalAlignment="Left" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="64"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <TextBlock Text="ChatGPT" Foreground="#FFF3F3F3" FontFamily="Segoe UI Variable Text, Segoe UI" FontWeight="SemiBold" FontSize="12" HorizontalAlignment="Left" VerticalAlignment="Center"/>
+          <TextBlock x:Name="TimeText" Grid.Column="1" Text="Weekly Reset unavailable" Foreground="#FFC7C7C7" FontFamily="Segoe UI Variable Text, Segoe UI" FontWeight="Normal" FontSize="12" HorizontalAlignment="Right" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
         </Grid>
         <Grid Grid.Row="1">
-          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="110"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-          <TextBlock Text="7D" Margin="0,0,5,0" Foreground="#FFC7C7C7" FontFamily="Segoe UI Variable Text, Segoe UI" FontWeight="SemiBold" FontSize="10" VerticalAlignment="Center"/>
-          <Border Grid.Column="1" Width="110" Height="6" Background="#556A6A6A" CornerRadius="3" HorizontalAlignment="Left" VerticalAlignment="Center">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="64"/><ColumnDefinition Width="100"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <TextBlock Text="Remaining" Margin="0,0,6,0" Foreground="#FFC7C7C7" FontFamily="Segoe UI Variable Text, Segoe UI" FontWeight="SemiBold" FontSize="10" VerticalAlignment="Center"/>
+          <Border Grid.Column="1" Width="100" Height="6" Background="#556A6A6A" CornerRadius="3" HorizontalAlignment="Left" VerticalAlignment="Center">
             <Border x:Name="RemainingBar" Width="0" Height="6" Background="#FF70D88B" CornerRadius="3" HorizontalAlignment="Left"/>
           </Border>
-          <TextBlock x:Name="PercentText" Grid.Column="2" Text="--%" Margin="6,0,0,0" Foreground="#FFF3F3F3" FontFamily="Segoe UI Variable Text, Segoe UI" FontWeight="SemiBold" FontSize="11" VerticalAlignment="Center"/>
+          <TextBlock x:Name="PercentText" Grid.Column="2" Text="--%" Margin="8,0,0,0" Foreground="#FFF3F3F3" FontFamily="Segoe UI Variable Text, Segoe UI" FontWeight="SemiBold" FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Center"/>
         </Grid>
       </Grid>
     </Grid>
@@ -116,13 +124,20 @@ $weatherMenu = $root.ContextMenu.Items[1]
 $rightMenu = $root.ContextMenu.Items[2]
 $nextDisplayMenu = $root.ContextMenu.Items[3]
 $refreshMenu = $root.ContextMenu.Items[4]
-$lockMenu = $root.ContextMenu.Items[5]
-$animateMenu = $root.ContextMenu.Items[6]
-$speedMenu = $root.ContextMenu.Items[7]
+$refreshIntervalMenu = $root.ContextMenu.Items[5]
+$refresh30Menu = $refreshIntervalMenu.Items[0]
+$refresh2mMenu = $refreshIntervalMenu.Items[1]
+$refresh5mMenu = $refreshIntervalMenu.Items[2]
+$refreshManualMenu = $refreshIntervalMenu.Items[3]
+$lockMenu = $root.ContextMenu.Items[6]
+$animateMenu = $root.ContextMenu.Items[7]
+$speedMenu = $root.ContextMenu.Items[8]
 $slowMenu = $speedMenu.Items[0]
 $normalMenu = $speedMenu.Items[1]
 $fastMenu = $speedMenu.Items[2]
-$exitMenu = $root.ContextMenu.Items[9]
+$exitMenu = $root.ContextMenu.Items[10]
+$script:refreshSeconds = 30
+$script:refreshMode = '30 seconds'
 $script:widgetHandle = [IntPtr]::Zero
 $script:workBottom = 0
 $script:positionLocked = $false
@@ -144,7 +159,7 @@ $script:dragStartLeft = 0.0
 
 function Save-TaskbarPosition {
   try {
-    @{ Left=$script:widgetLeft; Locked=$script:positionLocked; Animate=$script:animateIcon; AnimationSpeed=$script:animationSpeed; ScreenIndex=$script:screenIndex } |
+    @{ Left=$script:widgetLeft; Locked=$script:positionLocked; Animate=$script:animateIcon; AnimationSpeed=$script:animationSpeed; ScreenIndex=$script:screenIndex; RefreshMode=$script:refreshMode } |
       ConvertTo-Json | Set-Content $stateFile -Encoding UTF8
   } catch { }
 }
@@ -342,15 +357,15 @@ function Refresh-Usage {
   $limit = $snapshot.Long
   if (-not $limit) {
     $percentText.Text = '--%'
-    $timeText.Text = 'Reset date unavailable'
+    $timeText.Text = 'Weekly Reset unavailable'
     $remainingBar.Width = 0
-    $root.ToolTip = 'No Codex usage data found'
+    $root.ToolTip = 'ChatGPT Codex - No usage data found'
     Write-WidgetLog 'No Codex usage data found'
     return
   }
   $left = [math]::Max(0, [math]::Round(100 - [double]$limit.used_percent))
   $percentText.Text = "$left%"
-  $remainingBar.Width = 110 * ($left / 100)
+  $remainingBar.Width = 100 * ($left / 100)
   $age = [DateTimeOffset]::Now - $snapshot.EventTime
   $isStale = $age.TotalMinutes -gt 5
   $freshness = if ($isStale) { 'Data may be stale' } else { 'Live' }
@@ -361,13 +376,22 @@ function Refresh-Usage {
     $remainingBar.Background = if ($left -le 10) { '#FFEF4444' } elseif ($left -le 30) { '#FFF59E0B' } else { '#FF70D88B' }
     $percentText.Foreground = '#FFF3F3F3'
   }
-  $root.ToolTip = '{0} - updated {1:HH:mm:ss}' -f $freshness,$snapshot.EventTime
+  $shortText = if ($snapshot.Short) { [math]::Max(0, [math]::Round(100 - [double]$snapshot.Short.used_percent)) } else { '--' }
+  $resetText = 'reset unavailable'
+  if ($limit.resets_at) {
+    $reset = [DateTimeOffset]::FromUnixTimeSeconds([long]$limit.resets_at).ToLocalTime()
+    $remaining = $reset - [DateTimeOffset]::Now
+    if ($remaining.TotalSeconds -gt 0) {
+      $resetText = if ($remaining.TotalDays -ge 1) { 'in {0}d {1}h' -f [math]::Floor($remaining.TotalDays),$remaining.Hours } else { 'in {0}h {1}m' -f [math]::Floor($remaining.TotalHours),$remaining.Minutes }
+    } else { $resetText = 'ready to reset' }
+  }
+  $root.ToolTip = 'ChatGPT Codex - 7D {0}% left; 5H {1}% left; {2}; {3}; updated {4:HH:mm:ss}' -f $left,$shortText,$resetText,$freshness,$snapshot.EventTime
   $codexRunning = Get-Process codex,ChatGPT -ErrorAction SilentlyContinue | Select-Object -First 1
   if (-not $codexRunning) { $root.ToolTip = '{0}; Codex is not running' -f $root.ToolTip }
   if ($limit.resets_at) {
     $reset = [DateTimeOffset]::FromUnixTimeSeconds([long]$limit.resets_at).ToLocalTime()
-    $timeText.Text = 'Reset {0}' -f $reset.ToString('ddd d MMM HH:mm', [Globalization.CultureInfo]::InvariantCulture)
-  } else { $timeText.Text = 'Reset date unavailable' }
+    $timeText.Text = 'Weekly Resets {0}' -f $reset.ToString('MMM d', [Globalization.CultureInfo]::InvariantCulture)
+  } else { $timeText.Text = 'Weekly Reset unavailable' }
 }
 
 $window.Add_SourceInitialized({
@@ -381,11 +405,18 @@ $window.Add_SourceInitialized({
       if ($saved.Animate -ne $null) { $script:animateIcon = [bool]$saved.Animate }
       if ($saved.AnimationSpeed -in @('Slow','Normal','Fast')) { $script:animationSpeed = [string]$saved.AnimationSpeed }
       if ($saved.ScreenIndex -ne $null) { $script:screenIndex = [int]$saved.ScreenIndex }
+      if ($saved.RefreshMode -in @('30 seconds','2 minutes','5 minutes','Manual only')) { $script:refreshMode = [string]$saved.RefreshMode }
     } catch { }
   }
   $lockMenu.IsChecked = $script:positionLocked
   $root.Cursor = if ($script:positionLocked) { 'Arrow' } else { 'SizeWE' }
   Update-AnimationMenu
+  $refresh30Menu.IsChecked = $script:refreshMode -eq '30 seconds'
+  $refresh2mMenu.IsChecked = $script:refreshMode -eq '2 minutes'
+  $refresh5mMenu.IsChecked = $script:refreshMode -eq '5 minutes'
+  $refreshManualMenu.IsChecked = $script:refreshMode -eq 'Manual only'
+  $script:refreshSeconds = switch ($script:refreshMode) { '2 minutes' { 120 } '5 minutes' { 300 } default { 30 } }
+  $timer.Interval = [TimeSpan]::FromSeconds($script:refreshSeconds)
   Sync-DisplayGeometry
   Set-TaskbarPosition $initialLeft
   Attach-WidgetToTaskbar
@@ -424,6 +455,21 @@ $nextDisplayMenu.Add_Click({
   if ($count -gt 0) { $script:screenIndex = ($script:screenIndex + 1) % $count; Sync-DisplayGeometry; Set-TaskbarPosition $script:screenLeft }
 })
 $refreshMenu.Add_Click({ Refresh-Usage })
+$setRefreshMode = {
+  param([string]$mode,[int]$seconds)
+  $script:refreshMode = $mode
+  $script:refreshSeconds = $seconds
+  $timer.Interval = [TimeSpan]::FromSeconds($seconds)
+  $refresh30Menu.IsChecked = $mode -eq '30 seconds'
+  $refresh2mMenu.IsChecked = $mode -eq '2 minutes'
+  $refresh5mMenu.IsChecked = $mode -eq '5 minutes'
+  $refreshManualMenu.IsChecked = $mode -eq 'Manual only'
+  Save-TaskbarPosition
+}
+$refresh30Menu.Add_Click({ & $setRefreshMode '30 seconds' 30 })
+$refresh2mMenu.Add_Click({ & $setRefreshMode '2 minutes' 120 })
+$refresh5mMenu.Add_Click({ & $setRefreshMode '5 minutes' 300 })
+$refreshManualMenu.Add_Click({ & $setRefreshMode 'Manual only' 3600 })
 $lockMenu.Add_Click({
   $script:positionLocked = $lockMenu.IsChecked
   $root.Cursor = if ($script:positionLocked) { 'Arrow' } else { 'SizeWE' }
@@ -440,8 +486,8 @@ $fastMenu.Add_Click({ $script:animationSpeed='Fast'; Set-IconAnimation; Save-Tas
 $exitMenu.Add_Click({ $window.Close() })
 
 $timer = [Windows.Threading.DispatcherTimer]::new()
-$timer.Interval = [TimeSpan]::FromSeconds(30)
-$timer.Add_Tick({ Refresh-Usage; Set-IconAnimation; Sync-DisplayGeometry })
+$timer.Interval = [TimeSpan]::FromSeconds($script:refreshSeconds)
+$timer.Add_Tick({ if ($script:refreshMode -ne 'Manual only') { Refresh-Usage }; Set-IconAnimation; Sync-DisplayGeometry })
 $timer.Start()
 $zOrderTimer = [Windows.Threading.DispatcherTimer]::new()
 $zOrderTimer.Interval = [TimeSpan]::FromSeconds(1)
