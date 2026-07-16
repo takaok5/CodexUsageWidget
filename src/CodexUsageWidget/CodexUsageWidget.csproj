@@ -1,0 +1,35 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>CodexTaskbarWidget</AssemblyName>
+    <RootNamespace>CodexUsageWidget</RootNamespace>
+    <Product>ChatGPT Codex Usage Widget</Product>
+    <AssemblyTitle>ChatGPT Codex Usage Widget</AssemblyTitle>
+    <Description>Lightweight ChatGPT Codex usage widget for the Windows taskbar.</Description>
+    <Authors>anekhirun</Authors>
+    <Copyright>Copyright © 2026 anekhirun</Copyright>
+    <ApplicationIcon>..\..\CodexWidget.ico</ApplicationIcon>
+    <Version>2.0.0</Version>
+    <InformationalVersion>2.0.0</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
+    <FileVersion>2.0.0.0</FileVersion>
+    <DebugType>embedded</DebugType>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="..\..\CodexWidget.ico" Link="CodexWidget.ico" />
+  </ItemGroup>
+
+</Project>
