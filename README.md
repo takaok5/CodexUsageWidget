@@ -1,15 +1,16 @@
 # ChatGPT Codex Usage Widget for Windows 11
 
-A lightweight, Codex-only taskbar widget for Windows 11. It reads local Codex
-session data and keeps the weekly remaining allowance visible without opening a
-usage dashboard.
+A lightweight, Codex-only taskbar widget built with **C#**, **.NET 8**, and
+**WPF**. It reads local Codex session data and keeps the weekly remaining
+allowance visible without opening a usage dashboard.
 
-![ChatGPT Codex Usage Widget v1.0.8](screenshots/chatgpt-codex-usage-widget-v1.0.8.png)
+![ChatGPT Codex Usage Widget v2.0.0](screenshots/chatgpt-codex-usage-widget-v2.0.0.png)
 
 ## Highlights
 
-- Compact Windows 11 taskbar panel with a transparent native appearance.
-- Weekly remaining percentage, progress bar, and reset date.
+- Native C#/.NET 8 WPF application—no PowerShell runtime or companion script.
+- Self-contained Windows x64 EXE; users do not need to install .NET separately.
+- Compact taskbar panel with weekly remaining percentage and reset date.
 - 5-hour and 7-day usage details in the tooltip.
 - Live, stale, no-data, and Codex-not-running states.
 - Green, amber, red, and gray quota status colors.
@@ -21,14 +22,11 @@ usage dashboard.
 ## Run
 
 1. Download and extract the release ZIP.
-2. Keep `CodexTaskbarWidget.exe` and `CodexTaskbarWidget.ps1` in the same folder.
-3. Double-click `CodexTaskbarWidget.exe`.
+2. Double-click `CodexTaskbarWidget.exe`.
 
-The EXE is a small hidden launcher for the PowerShell/WPF widget. Administrator
-access is not required.
-
-Right-click the panel to refresh usage, change the refresh interval, move it
-between displays, lock its position, control icon animation, or exit.
+The application is self-contained and does not require administrator access.
+Right-click the panel to refresh usage, change the refresh interval, move it,
+lock its position, control icon animation, or exit.
 
 ## Start automatically with Windows
 
@@ -39,7 +37,8 @@ Windows Explorer and the taskbar have time to initialize.
 Alternatively, run `Install Taskbar Startup.ps1` to register the delayed
 launcher under the current user's Windows Run key.
 
-Run `Uninstall Taskbar Startup.ps1` to remove both startup methods.
+Run `Uninstall Taskbar Startup.ps1` to remove both current and legacy startup
+entries.
 
 ## Privacy
 
@@ -59,14 +58,32 @@ settings are stored in:
 Diagnostic logs are stored in the same folder and never include conversation
 text, API keys, cookies, or credentials.
 
-## Version 1.0.8
+## Build from source
 
-- Updated the visible identity to ChatGPT Codex.
-- Redesigned the two-line layout for weekly usage and remaining allowance.
-- Added the weekly reset date and detailed 5-hour/7-day tooltip.
-- Added clearer live, stale, not-running, and no-data states.
-- Added configurable refresh intervals.
-- Moved settings and logs to the current user's AppData folder.
-- Rebuilt the hidden Windows launcher and added its C# source.
+Requirements:
+
+- Windows 10/11 x64
+- .NET 8 SDK
+
+```powershell
+dotnet restore src\CodexUsageWidget\CodexUsageWidget.csproj --configfile NuGet.Config
+dotnet publish src\CodexUsageWidget\CodexUsageWidget.csproj -c Release -o publish\single
+```
+
+The published self-contained executable is written to:
+
+```text
+publish\single\CodexTaskbarWidget.exe
+```
+
+## Version 2.0.0
+
+- Rewritten from PowerShell/WPF to native C#/.NET 8 WPF.
+- Replaced the launcher-plus-script package with one self-contained EXE.
+- Preserved the v1.0.8 taskbar layout, quota parsing, reset date, and tooltip.
+- Preserved taskbar embedding, dragging, display presets, refresh settings, and
+  icon animation.
+- Preserved the existing AppData settings format for an in-place upgrade.
+- Updated automatic startup names, logs, documentation, and build metadata.
 
 See `VERSION.txt` for the current build information.

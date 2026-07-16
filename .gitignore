@@ -2,3 +2,12 @@ taskbar-state.json
 widget-state.json
 widget-errors.log
 widget-errors.log.old
+.dotnet-home/
+.appdata/
+.nuget-packages/
+**/bin/
+**/obj/
+publish/
+dist/
+.vs/
+*.user

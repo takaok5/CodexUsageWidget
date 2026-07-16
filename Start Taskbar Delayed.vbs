@@ -1,13 +1,15 @@
 Option Explicit
 
-Dim shell, fso, folder, exePath, logPath, logFile, result
+Dim shell, fso, folder, exePath, logDir, logPath, logFile, result
 Set shell = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
 folder = fso.GetParentFolderName(WScript.ScriptFullName)
 exePath = fso.BuildPath(folder, "CodexTaskbarWidget.exe")
-logPath = fso.BuildPath(folder, "startup-launcher.log")
+logDir = fso.BuildPath(shell.ExpandEnvironmentStrings("%APPDATA%"), "CodexUsageWidget")
 
 On Error Resume Next
+If Not fso.FolderExists(logDir) Then fso.CreateFolder(logDir)
+logPath = fso.BuildPath(logDir, "startup-launcher.log")
 Set logFile = fso.OpenTextFile(logPath, 8, True)
 logFile.WriteLine Now & " Startup launcher invoked"
 logFile.Close
