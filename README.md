@@ -49,15 +49,21 @@ is selected.
 The three custom modes select `gpt-5.6-sol` and update
 `model_context_window` plus `model_auto_compact_token_limit`. **Default**
 removes only those two context keys and leaves every other setting untouched.
-All changes apply to `%USERPROFILE%\.codex\config.toml`. Restart Codex after
-changing modes, then start a new task. Before replacing the existing file, the
-widget copies it to `config.toml.codex-usage-widget.bak` in the same directory.
+All changes apply to `%USERPROFILE%\.codex\config.toml`. A changed mode applies
+to the next new Codex task without restarting the app; a task that is already
+open keeps the configuration snapshot it started with. Before replacing the
+existing file, the widget copies it to
+`config.toml.codex-usage-widget.bak` in the same directory.
 
-If `config.toml` selects a custom `model_catalog_json`, the widget also keeps
-the `gpt-5.6-sol` `max_context_window` in sync with the selected mode. It saves
-the unmodified catalog once as `<catalog>.codex-usage-widget.bak`; **Default**
-restores the original catalog limit and removes the two TOML context overrides.
-Other model definitions and catalog fields are preserved.
+If `config.toml` selects a custom `model_catalog_json`, the widget keeps the
+`gpt-5.6-sol` `max_context_window` ceiling at 1,000,000. Codex caches custom
+catalogs when its backend starts, so the first expansion of an older catalog
+requires one restart; after that, switching modes applies live to new tasks.
+The widget saves the unmodified catalog once as
+`<catalog>.codex-usage-widget.bak`. **Default** removes the two TOML context
+overrides, so the original `context_window` and standard compaction remain
+active even though the harmless 1M ceiling stays available. Other model
+definitions and catalog fields are preserved.
 
 ## Start automatically with Windows
 
@@ -119,7 +125,8 @@ publish\single\CodexTaskbarWidget.exe
 - Refined the taskbar layout by removing redundant branding and placing the
   quota percentage directly beside the usage bar.
 - Added atomic global configuration saves and automatic backups.
-- Added custom model-catalog limit synchronization and Default restoration.
+- Added a stable custom model-catalog ceiling for restart-free mode changes on
+  new Codex tasks.
 - Added tests for TOML preservation, profile changes, and backups.
 
 ## Version 2.0.0

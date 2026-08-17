@@ -24,6 +24,7 @@ internal static partial class CodexConfigService
 {
     private const string TargetModel = "gpt-5.6-sol";
     private const string BackupSuffix = ".codex-usage-widget.bak";
+    private const int CatalogMaximumContextWindow = 1_000_000;
 
     internal static readonly IReadOnlyList<ContextMode> Modes =
     [
@@ -96,7 +97,7 @@ internal static partial class CodexConfigService
 
             catalogPath = ResolveCatalogPath(content, directory);
             if (catalogPath is not null)
-                (originalCatalog, updatedCatalog) = PrepareCatalogUpdate(catalogPath, mode);
+                (originalCatalog, updatedCatalog) = PrepareCatalogUpdate(catalogPath);
 
             bool configChanged = !string.Equals(content, updated, StringComparison.Ordinal);
             bool catalogChanged = updatedCatalog is not null &&
@@ -125,9 +126,9 @@ internal static partial class CodexConfigService
                 File.Move(temporaryPath, configPath, true);
                 temporaryPath = null;
             }
-            string successMessage = mode.IsDefault
-                ? "Default restored. Restart Codex to use the model's standard context settings."
-                : $"{mode.Name} applied. Restart Codex, then start a new task to use it.";
+            string successMessage = catalogChanged
+                ? $"{mode.Name} applied. Restart Codex once to load the expanded model limit; later changes apply live to new tasks."
+                : $"{mode.Name} applied. Start a new Codex task; no restart is required.";
             return new ConfigWriteResult(true, configPath, successMessage);
         }
         catch (JsonException exception)
@@ -176,7 +177,7 @@ internal static partial class CodexConfigService
                 : Path.Combine(configDirectory, configuredPath));
     }
 
-    private static (string Original, string? Updated) PrepareCatalogUpdate(string catalogPath, ContextMode mode)
+    private static (string Original, string Updated) PrepareCatalogUpdate(string catalogPath)
     {
         if (!File.Exists(catalogPath))
             throw new IOException($"Custom model catalog not found: {catalogPath}");
@@ -188,23 +189,12 @@ internal static partial class CodexConfigService
         if (currentModel is null)
             throw new JsonException($"The custom model catalog does not contain {TargetModel}.");
 
-        if (mode.IsDefault)
-        {
-            string backupPath = catalogPath + BackupSuffix;
-            if (!File.Exists(backupPath)) return (original, null);
-
-            JsonNode backupRoot = JsonNode.Parse(File.ReadAllText(backupPath))
-                ?? throw new JsonException("The model catalog backup is empty.");
-            JsonObject? originalModel = FindModel(backupRoot, TargetModel);
-            if (originalModel is null || originalModel["max_context_window"] is null)
-                throw new JsonException($"The model catalog backup does not contain {TargetModel}.max_context_window.");
-
-            currentModel["max_context_window"] = originalModel["max_context_window"]!.DeepClone();
-        }
-        else
-        {
-            currentModel["max_context_window"] = mode.ContextWindow!.Value;
-        }
+        // The app-server caches the model catalog for its lifetime, while it reloads
+        // config.toml for new threads. Keep the catalog ceiling stable at the largest
+        // supported widget mode so switching modes only needs a new Codex task.
+        // Default still uses the model's original context_window because it removes
+        // the TOML override; raising this ceiling does not activate a larger context.
+        currentModel["max_context_window"] = CatalogMaximumContextWindow;
 
         return (original, SerializeCatalog(currentRoot));
     }

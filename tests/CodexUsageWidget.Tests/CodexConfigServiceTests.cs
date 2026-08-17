@@ -95,7 +95,7 @@ public sealed class CodexConfigServiceTests : IDisposable
     }
 
     [Fact]
-    public void CustomCatalogLimitTracksModeAndDefaultRestoresOriginalLimit()
+    public void CustomCatalogKeepsMaximumCeilingWhileDefaultRestoresBaseContext()
     {
         string catalogPath = Path.Combine(_testDirectory, "models.json");
         File.WriteAllText(
@@ -118,15 +118,18 @@ public sealed class CodexConfigServiceTests : IDisposable
         ContextMode investigation = CodexConfigService.Modes.Single(mode => mode.Name == "Long-Running Investigation");
 
         Assert.True(CodexConfigService.ApplyToPath(configPath, large).Success);
-        Assert.Equal(600_000, ReadCatalogNumber(catalogPath, "max_context_window"));
+        Assert.Equal(1_000_000, ReadCatalogNumber(catalogPath, "max_context_window"));
         Assert.Equal(272_000, ReadCatalogNumber(catalogPath, "context_window"));
         Assert.True(File.Exists(catalogPath + ".codex-usage-widget.bak"));
+        Assert.Equal(
+            272_000,
+            ReadCatalogNumber(catalogPath + ".codex-usage-widget.bak", "max_context_window"));
 
         Assert.True(CodexConfigService.ApplyToPath(configPath, investigation).Success);
         Assert.Equal(1_000_000, ReadCatalogNumber(catalogPath, "max_context_window"));
 
         Assert.True(CodexConfigService.ApplyToPath(configPath, CodexConfigService.Modes[0]).Success);
-        Assert.Equal(272_000, ReadCatalogNumber(catalogPath, "max_context_window"));
+        Assert.Equal(1_000_000, ReadCatalogNumber(catalogPath, "max_context_window"));
         Assert.Equal(272_000, ReadCatalogNumber(catalogPath, "context_window"));
         Assert.DoesNotContain("model_context_window", File.ReadAllText(configPath));
     }
