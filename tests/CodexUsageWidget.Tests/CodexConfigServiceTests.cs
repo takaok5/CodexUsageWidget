@@ -1,4 +1,6 @@
 using System.Text.RegularExpressions;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Xunit;
 
 namespace CodexUsageWidget.Tests;
@@ -90,6 +92,64 @@ public sealed class CodexConfigServiceTests : IDisposable
 
         Assert.True(result.Success, result.Message);
         Assert.False(File.Exists(configPath));
+    }
+
+    [Fact]
+    public void CustomCatalogLimitTracksModeAndDefaultRestoresOriginalLimit()
+    {
+        string catalogPath = Path.Combine(_testDirectory, "models.json");
+        File.WriteAllText(
+            catalogPath,
+            """
+            {
+              "models": [
+                {
+                  "slug": "gpt-5.6-sol",
+                  "context_window": 272000,
+                  "max_context_window": 272000
+                }
+              ]
+            }
+            """);
+        string configPath = Path.Combine(_testDirectory, "config.toml");
+        File.WriteAllText(configPath, $"model_catalog_json = {JsonSerializer.Serialize(catalogPath)}\n");
+
+        ContextMode large = CodexConfigService.Modes.Single(mode => mode.Name == "Large Codebase");
+        ContextMode investigation = CodexConfigService.Modes.Single(mode => mode.Name == "Long-Running Investigation");
+
+        Assert.True(CodexConfigService.ApplyToPath(configPath, large).Success);
+        Assert.Equal(600_000, ReadCatalogNumber(catalogPath, "max_context_window"));
+        Assert.Equal(272_000, ReadCatalogNumber(catalogPath, "context_window"));
+        Assert.True(File.Exists(catalogPath + ".codex-usage-widget.bak"));
+
+        Assert.True(CodexConfigService.ApplyToPath(configPath, investigation).Success);
+        Assert.Equal(1_000_000, ReadCatalogNumber(catalogPath, "max_context_window"));
+
+        Assert.True(CodexConfigService.ApplyToPath(configPath, CodexConfigService.Modes[0]).Success);
+        Assert.Equal(272_000, ReadCatalogNumber(catalogPath, "max_context_window"));
+        Assert.Equal(272_000, ReadCatalogNumber(catalogPath, "context_window"));
+        Assert.DoesNotContain("model_context_window", File.ReadAllText(configPath));
+    }
+
+    [Fact]
+    public void InvalidCustomCatalogDoesNotModifyConfig()
+    {
+        string catalogPath = Path.Combine(_testDirectory, "models.json");
+        File.WriteAllText(catalogPath, "not json");
+        string configPath = Path.Combine(_testDirectory, "config.toml");
+        string original = $"model_catalog_json = {JsonSerializer.Serialize(catalogPath)}\n";
+        File.WriteAllText(configPath, original);
+
+        ConfigWriteResult result = CodexConfigService.ApplyToPath(configPath, CodexConfigService.Modes[1]);
+
+        Assert.False(result.Success);
+        Assert.Equal(original, File.ReadAllText(configPath));
+    }
+
+    private static int ReadCatalogNumber(string catalogPath, string key)
+    {
+        JsonNode root = JsonNode.Parse(File.ReadAllText(catalogPath))!;
+        return root["models"]![0]![key]!.GetValue<int>();
     }
 
     public void Dispose()

@@ -1,5 +1,7 @@
 using System.IO;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
 namespace CodexUsageWidget;
@@ -20,6 +22,9 @@ internal sealed record ConfigWriteResult(bool Success, string ConfigPath, string
 
 internal static partial class CodexConfigService
 {
+    private const string TargetModel = "gpt-5.6-sol";
+    private const string BackupSuffix = ".codex-usage-widget.bak";
+
     internal static readonly IReadOnlyList<ContextMode> Modes =
     [
         new(0, "Default", "Model default", "Standard compaction", "Uses the context settings supplied by Codex", null, null),
@@ -71,6 +76,9 @@ internal static partial class CodexConfigService
             return new ConfigWriteResult(false, configPath, "Invalid configuration path.");
 
         string? temporaryPath = null;
+        string? catalogPath = null;
+        string? originalCatalog = null;
+        bool catalogWritten = false;
         try
         {
             if (mode.IsDefault && !File.Exists(configPath))
@@ -84,8 +92,16 @@ internal static partial class CodexConfigService
             Directory.CreateDirectory(directory);
             string content = File.Exists(configPath) ? File.ReadAllText(configPath) : string.Empty;
             string updated = UpdateTopLevel(content, mode);
+            string? updatedCatalog = null;
 
-            if (File.Exists(configPath) && string.Equals(content, updated, StringComparison.Ordinal))
+            catalogPath = ResolveCatalogPath(content, directory);
+            if (catalogPath is not null)
+                (originalCatalog, updatedCatalog) = PrepareCatalogUpdate(catalogPath, mode);
+
+            bool configChanged = !string.Equals(content, updated, StringComparison.Ordinal);
+            bool catalogChanged = updatedCatalog is not null &&
+                                  !string.Equals(originalCatalog, updatedCatalog, StringComparison.Ordinal);
+            if (!configChanged && !catalogChanged)
             {
                 string message = mode.IsDefault
                     ? "Default is already active; Codex is using the model's standard context settings."
@@ -93,24 +109,41 @@ internal static partial class CodexConfigService
                 return new ConfigWriteResult(true, configPath, message);
             }
 
-            if (File.Exists(configPath)) File.Copy(configPath, configPath + ".codex-usage-widget.bak", true);
+            if (catalogChanged)
+            {
+                if (!File.Exists(catalogPath! + BackupSuffix))
+                    File.Copy(catalogPath!, catalogPath! + BackupSuffix, false);
+                WriteAtomically(catalogPath!, updatedCatalog!);
+                catalogWritten = true;
+            }
 
-            temporaryPath = Path.Combine(directory, $".{Path.GetFileName(configPath)}.{Guid.NewGuid():N}.tmp");
-            File.WriteAllText(temporaryPath, updated, new UTF8Encoding(false));
-            File.Move(temporaryPath, configPath, true);
-            temporaryPath = null;
+            if (configChanged)
+            {
+                if (File.Exists(configPath)) File.Copy(configPath, configPath + BackupSuffix, true);
+                temporaryPath = Path.Combine(directory, $".{Path.GetFileName(configPath)}.{Guid.NewGuid():N}.tmp");
+                File.WriteAllText(temporaryPath, updated, new UTF8Encoding(false));
+                File.Move(temporaryPath, configPath, true);
+                temporaryPath = null;
+            }
             string successMessage = mode.IsDefault
-                ? "Default restored. Codex will use the model's standard context settings."
-                : $"{mode.Name} applied. Start a new Codex task to use it.";
+                ? "Default restored. Restart Codex to use the model's standard context settings."
+                : $"{mode.Name} applied. Restart Codex, then start a new task to use it.";
             return new ConfigWriteResult(true, configPath, successMessage);
+        }
+        catch (JsonException exception)
+        {
+            RollBackCatalog(catalogPath, originalCatalog, catalogWritten);
+            return new ConfigWriteResult(false, configPath, $"The custom model catalog is not valid JSON: {exception.Message}");
         }
         catch (UnauthorizedAccessException)
         {
+            RollBackCatalog(catalogPath, originalCatalog, catalogWritten);
             return new ConfigWriteResult(false, configPath, "Access denied while updating config.toml.");
         }
         catch (IOException exception)
         {
-            return new ConfigWriteResult(false, configPath, $"Could not update config.toml: {exception.Message}");
+            RollBackCatalog(catalogPath, originalCatalog, catalogWritten);
+            return new ConfigWriteResult(false, configPath, $"Could not update Codex configuration: {exception.Message}");
         }
         finally
         {
@@ -119,6 +152,97 @@ internal static partial class CodexConfigService
                 try { File.Delete(temporaryPath); } catch { }
             }
         }
+    }
+
+    private static string? ResolveCatalogPath(string configContent, string configDirectory)
+    {
+        int sectionStart = FindFirstSectionStart(configContent);
+        string topLevel = sectionStart < 0 ? configContent : configContent[..sectionStart];
+        Match match = Regex.Match(
+            topLevel,
+            @"(?m)^\s*model_catalog_json\s*=\s*(?<value>""(?:\\.|[^""])*""|'[^']*')\s*(?:#.*)?$",
+            RegexOptions.CultureInvariant);
+        if (!match.Success) return null;
+
+        string literal = match.Groups["value"].Value;
+        string? configuredPath = literal[0] == '\''
+            ? literal[1..^1]
+            : JsonSerializer.Deserialize<string>(literal);
+        if (string.IsNullOrWhiteSpace(configuredPath)) return null;
+
+        return Path.GetFullPath(
+            Path.IsPathRooted(configuredPath)
+                ? configuredPath
+                : Path.Combine(configDirectory, configuredPath));
+    }
+
+    private static (string Original, string? Updated) PrepareCatalogUpdate(string catalogPath, ContextMode mode)
+    {
+        if (!File.Exists(catalogPath))
+            throw new IOException($"Custom model catalog not found: {catalogPath}");
+
+        string original = File.ReadAllText(catalogPath);
+        JsonNode currentRoot = JsonNode.Parse(original)
+            ?? throw new JsonException("The custom model catalog is empty.");
+        JsonObject? currentModel = FindModel(currentRoot, TargetModel);
+        if (currentModel is null)
+            throw new JsonException($"The custom model catalog does not contain {TargetModel}.");
+
+        if (mode.IsDefault)
+        {
+            string backupPath = catalogPath + BackupSuffix;
+            if (!File.Exists(backupPath)) return (original, null);
+
+            JsonNode backupRoot = JsonNode.Parse(File.ReadAllText(backupPath))
+                ?? throw new JsonException("The model catalog backup is empty.");
+            JsonObject? originalModel = FindModel(backupRoot, TargetModel);
+            if (originalModel is null || originalModel["max_context_window"] is null)
+                throw new JsonException($"The model catalog backup does not contain {TargetModel}.max_context_window.");
+
+            currentModel["max_context_window"] = originalModel["max_context_window"]!.DeepClone();
+        }
+        else
+        {
+            currentModel["max_context_window"] = mode.ContextWindow!.Value;
+        }
+
+        return (original, SerializeCatalog(currentRoot));
+    }
+
+    private static JsonObject? FindModel(JsonNode root, string slug)
+    {
+        JsonArray? models = root is JsonArray array ? array : root["models"] as JsonArray;
+        return models?
+            .OfType<JsonObject>()
+            .FirstOrDefault(model => string.Equals((string?)model["slug"], slug, StringComparison.Ordinal));
+    }
+
+    private static string SerializeCatalog(JsonNode root) =>
+        root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine;
+
+    private static void WriteAtomically(string path, string content)
+    {
+        string directory = Path.GetDirectoryName(path)
+            ?? throw new IOException($"Invalid path: {path}");
+        string temporaryPath = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            File.WriteAllText(temporaryPath, content, new UTF8Encoding(false));
+            File.Move(temporaryPath, path, true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                try { File.Delete(temporaryPath); } catch { }
+            }
+        }
+    }
+
+    private static void RollBackCatalog(string? path, string? content, bool wasWritten)
+    {
+        if (!wasWritten || path is null || content is null) return;
+        try { WriteAtomically(path, content); } catch { }
     }
 
     private static string UpdateTopLevel(string content, ContextMode mode)
@@ -142,7 +266,7 @@ internal static partial class CodexConfigService
         {
             var values = new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                ["model"] = "\"gpt-5.6-sol\"",
+                ["model"] = $"\"{TargetModel}\"",
                 ["model_context_window"] = mode.ContextWindow!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["model_auto_compact_token_limit"] = mode.CompactLimit!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)
             };

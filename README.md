@@ -20,6 +20,8 @@ allowance visible without opening a usage dashboard.
 - Short, four-position Codex work-mode slider embedded directly in the taskbar
   panel for Default, 300K, 600K, or 1M token context.
 - Atomic updates to the user-level Codex `config.toml` with a one-step backup.
+- Automatic synchronization of a configured `model_catalog_json`, so a custom
+  catalog cannot silently clamp the selected context window.
 - No additional sign-in, API key, or browser cookie is required.
 
 ## Run
@@ -47,10 +49,15 @@ is selected.
 The three custom modes select `gpt-5.6-sol` and update
 `model_context_window` plus `model_auto_compact_token_limit`. **Default**
 removes only those two context keys and leaves every other setting untouched.
-All changes apply to `%USERPROFILE%\.codex\config.toml`. Start a new Codex task
-after changing modes. Before replacing the existing file, the widget copies it
-to `config.toml.codex-usage-widget.bak` in the same directory. Default restores
-the model's own standard context and compaction behavior.
+All changes apply to `%USERPROFILE%\.codex\config.toml`. Restart Codex after
+changing modes, then start a new task. Before replacing the existing file, the
+widget copies it to `config.toml.codex-usage-widget.bak` in the same directory.
+
+If `config.toml` selects a custom `model_catalog_json`, the widget also keeps
+the `gpt-5.6-sol` `max_context_window` in sync with the selected mode. It saves
+the unmodified catalog once as `<catalog>.codex-usage-widget.bak`; **Default**
+restores the original catalog limit and removes the two TOML context overrides.
+Other model definitions and catalog fields are preserved.
 
 ## Start automatically with Windows
 
@@ -73,7 +80,9 @@ The widget reads usage events from the known local Codex session location:
 ```
 
 When you move the work-mode slider, it writes only the three documented
-model/context keys in the user-level Codex configuration file.
+model/context keys in the user-level Codex configuration file. If that file
+selects a custom model catalog, the widget updates only the
+`gpt-5.6-sol.max_context_window` field as described above.
 
 It does not send usage data to the internet. Position, animation, and refresh
 settings are stored in:
@@ -110,6 +119,7 @@ publish\single\CodexTaskbarWidget.exe
 - Refined the taskbar layout by removing redundant branding and placing the
   quota percentage directly beside the usage bar.
 - Added atomic global configuration saves and automatic backups.
+- Added custom model-catalog limit synchronization and Default restoration.
 - Added tests for TOML preservation, profile changes, and backups.
 
 ## Version 2.0.0

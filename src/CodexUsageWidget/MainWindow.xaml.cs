@@ -137,12 +137,15 @@ public partial class MainWindow : Window
     {
         ContextMode? configuredMode = CodexConfigService.ReadMode(CodexConfigService.GlobalConfigPath);
         ContextMode mode = configuredMode ?? CodexConfigService.Modes[0];
+        ConfigWriteResult? reconciliation = configuredMode is null
+            ? null
+            : CodexConfigService.ApplyGlobal(mode);
         _loadingContextMode = true;
         TaskbarModeSlider.Value = mode.Index;
         TaskbarModeText.Text = CompactModeLabel(mode);
         TaskbarModeSlider.IsEnabled = true;
         _loadingContextMode = false;
-        UpdateContextToolTip(mode);
+        UpdateContextToolTip(mode, reconciliation?.Message);
     }
 
     private void ApplyTaskbarContextMode()
