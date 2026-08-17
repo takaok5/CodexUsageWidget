@@ -20,6 +20,15 @@ internal sealed record ContextMode(
 
 internal sealed record ConfigWriteResult(bool Success, string ConfigPath, string Message);
 
+internal sealed record ContextConfigState(
+    ContextMode? Mode,
+    int? ContextWindow,
+    int? CompactLimit,
+    bool ReadFailed = false)
+{
+    internal bool IsCustom => Mode is null;
+}
+
 internal static partial class CodexConfigService
 {
     private const string TargetModel = "gpt-5.6-sol";
@@ -45,9 +54,9 @@ internal static partial class CodexConfigService
 
     internal static ConfigWriteResult ApplyToPath(string configPath, ContextMode mode) => Apply(configPath, mode);
 
-    internal static ContextMode? ReadMode(string configPath)
+    internal static ContextConfigState ReadState(string configPath)
     {
-        if (!File.Exists(configPath)) return null;
+        if (!File.Exists(configPath)) return new ContextConfigState(Modes[0], null, null);
 
         try
         {
@@ -56,17 +65,17 @@ internal static partial class CodexConfigService
             string topLevel = sectionStart < 0 ? content : content[..sectionStart];
             int? context = ReadNumber(topLevel, "model_context_window");
             int? compact = ReadNumber(topLevel, "model_auto_compact_token_limit");
-            if (context is null) return null;
+            if (context is null && compact is null)
+                return new ContextConfigState(Modes[0], null, null);
 
-            return Modes
+            ContextMode? exactMode = Modes
                 .Where(mode => !mode.IsDefault)
-                .OrderBy(mode => Math.Abs((long)mode.ContextWindow!.Value - context.Value) +
-                                 (compact is null ? 0 : Math.Abs((long)mode.CompactLimit!.Value - compact.Value)) / 2)
-                .First();
+                .SingleOrDefault(mode => mode.ContextWindow == context && mode.CompactLimit == compact);
+            return new ContextConfigState(exactMode, context, compact);
         }
         catch
         {
-            return null;
+            return new ContextConfigState(null, null, null, ReadFailed: true);
         }
     }
 
@@ -256,7 +265,6 @@ internal static partial class CodexConfigService
         {
             var values = new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                ["model"] = $"\"{TargetModel}\"",
                 ["model_context_window"] = mode.ContextWindow!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["model_auto_compact_token_limit"] = mode.CompactLimit!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)
             };

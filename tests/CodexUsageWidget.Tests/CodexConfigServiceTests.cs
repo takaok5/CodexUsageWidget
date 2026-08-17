@@ -16,7 +16,7 @@ public sealed class CodexConfigServiceTests : IDisposable
     public void ApplyCreatesTopLevelContextSettingsAndPreservesSections()
     {
         string configPath = Path.Combine(_testDirectory, "config.toml");
-        File.WriteAllText(configPath, "# keep this comment\n[features]\njs_repl = true\n");
+        File.WriteAllText(configPath, "model = \"gpt-5.4\"\n# keep this comment\n[features]\njs_repl = true\n");
 
         ContextMode investigation = CodexConfigService.Modes.Single(mode => mode.Name == "Long-Running Investigation");
         ConfigWriteResult result = CodexConfigService.ApplyToPath(configPath, investigation);
@@ -26,7 +26,8 @@ public sealed class CodexConfigServiceTests : IDisposable
         int sectionStart = updated.IndexOf("[features]", StringComparison.Ordinal);
         Assert.True(sectionStart > 0);
         string topLevel = updated[..sectionStart];
-        Assert.Contains("model = \"gpt-5.6-sol\"", topLevel);
+        Assert.Contains("model = \"gpt-5.4\"", topLevel);
+        Assert.DoesNotContain("gpt-5.6-sol", topLevel);
         Assert.Contains("model_context_window = 1000000", topLevel);
         Assert.Contains("model_auto_compact_token_limit = 900000", topLevel);
         Assert.Contains("js_repl = true", updated);
@@ -52,15 +53,31 @@ public sealed class CodexConfigServiceTests : IDisposable
     }
 
     [Fact]
-    public void ReadModeFindsTheNearestWorkMode()
+    public void ReadStateTreatsNonPresetValuesAsCustomWithoutChangingTheFile()
     {
         string configPath = Path.Combine(_testDirectory, "config.toml");
-        File.WriteAllText(configPath, "model_context_window = 590000\nmodel_auto_compact_token_limit = 490000\n");
+        string original = "model_context_window = 590000\nmodel_auto_compact_token_limit = 490000\n";
+        File.WriteAllText(configPath, original);
 
-        ContextMode? mode = CodexConfigService.ReadMode(configPath);
+        ContextConfigState state = CodexConfigService.ReadState(configPath);
 
-        Assert.NotNull(mode);
-        Assert.Equal("Large Codebase", mode.Name);
+        Assert.True(state.IsCustom);
+        Assert.Null(state.Mode);
+        Assert.Equal(590_000, state.ContextWindow);
+        Assert.Equal(490_000, state.CompactLimit);
+        Assert.Equal(original, File.ReadAllText(configPath));
+    }
+
+    [Fact]
+    public void ReadStateRecognizesOnlyAnExactPreset()
+    {
+        string configPath = Path.Combine(_testDirectory, "config.toml");
+        File.WriteAllText(configPath, "model_context_window = 600000\nmodel_auto_compact_token_limit = 500000\n");
+
+        ContextConfigState state = CodexConfigService.ReadState(configPath);
+
+        Assert.False(state.IsCustom);
+        Assert.Equal("Large Codebase", state.Mode!.Name);
     }
 
     [Fact]
@@ -81,6 +98,25 @@ public sealed class CodexConfigServiceTests : IDisposable
         Assert.Contains("model = \"gpt-5.6-sol\"", updated);
         Assert.Contains("[features]", updated);
         Assert.Contains("js_repl = true", updated);
+    }
+
+    [Fact]
+    public void ApplyingCustomPresetPreservesTheUsersModelSetting()
+    {
+        string configPath = Path.Combine(_testDirectory, "config.toml");
+        File.WriteAllText(
+            configPath,
+            "model = \"gpt-5.4\"\nmodel_context_window = 590000\n" +
+            "model_auto_compact_token_limit = 490000\n");
+
+        ConfigWriteResult result = CodexConfigService.ApplyToPath(configPath, CodexConfigService.Modes[2]);
+
+        Assert.True(result.Success, result.Message);
+        string updated = File.ReadAllText(configPath);
+        Assert.Contains("model = \"gpt-5.4\"", updated);
+        Assert.DoesNotContain("gpt-5.6-sol", updated);
+        Assert.Contains("model_context_window = 600000", updated);
+        Assert.Contains("model_auto_compact_token_limit = 500000", updated);
     }
 
     [Fact]

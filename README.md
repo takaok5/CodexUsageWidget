@@ -46,9 +46,11 @@ is selected.
 | Large Codebase | 600,000 | 500,000 | More repository and tool history |
 | Long-Running Investigation | 1,000,000 | 900,000 | Reverse engineering, migrations, and debugging |
 
-The three custom modes select `gpt-5.6-sol` and update
-`model_context_window` plus `model_auto_compact_token_limit`. **Default**
-removes only those two context keys and leaves every other setting untouched.
+The three custom modes update `model_context_window` plus
+`model_auto_compact_token_limit` without changing the user's selected model.
+**Default** removes only those two context keys and leaves every other setting
+untouched. Existing non-preset values appear as **Custom** and remain unchanged
+until the user explicitly moves the slider.
 All changes apply to `%USERPROFILE%\.codex\config.toml`. A changed mode applies
 to the next new Codex task without restarting the app; a task that is already
 open keeps the configuration snapshot it started with. Before replacing the

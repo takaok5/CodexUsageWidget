@@ -135,17 +135,16 @@ public partial class MainWindow : Window
 
     private void ReloadTaskbarContextMode()
     {
-        ContextMode? configuredMode = CodexConfigService.ReadMode(CodexConfigService.GlobalConfigPath);
-        ContextMode mode = configuredMode ?? CodexConfigService.Modes[0];
-        ConfigWriteResult? reconciliation = configuredMode is null
-            ? null
-            : CodexConfigService.ApplyGlobal(mode);
+        ContextConfigState state = CodexConfigService.ReadState(CodexConfigService.GlobalConfigPath);
         _loadingContextMode = true;
-        TaskbarModeSlider.Value = mode.Index;
-        TaskbarModeText.Text = CompactModeLabel(mode);
+        TaskbarModeSlider.Value = state.IsCustom ? CustomSliderPosition(state) : state.Mode!.Index;
+        TaskbarModeText.Text = state.IsCustom ? "CUSTOM" : CompactModeLabel(state.Mode!);
         TaskbarModeSlider.IsEnabled = true;
         _loadingContextMode = false;
-        UpdateContextToolTip(mode, reconciliation?.Message);
+        if (state.IsCustom)
+            UpdateCustomContextToolTip(state);
+        else
+            UpdateContextToolTip(state.Mode!);
     }
 
     private void ApplyTaskbarContextMode()
@@ -162,6 +161,39 @@ public partial class MainWindow : Window
     {
         string summary = $"{mode.Name} · {mode.ContextLabel} · Global Codex setting";
         TaskbarModeSlider.ToolTip = resultMessage is null ? summary : $"{resultMessage}\n{summary}";
+    }
+
+    private void UpdateCustomContextToolTip(ContextConfigState state)
+    {
+        string detail = state.ReadFailed
+            ? "Could not read the current context settings"
+            : $"{FormatTokenCount(state.ContextWindow)} context · {FormatTokenCount(state.CompactLimit)} auto-compaction";
+        TaskbarModeSlider.ToolTip =
+            $"Custom · {detail} · config.toml is preserved until you move the slider";
+    }
+
+    private static double CustomSliderPosition(ContextConfigState state)
+    {
+        if (state.ContextWindow is null) return 0.5;
+
+        ContextMode nearest = CodexConfigService.Modes
+            .Where(mode => !mode.IsDefault)
+            .OrderBy(mode => Math.Abs((long)mode.ContextWindow!.Value - state.ContextWindow.Value) +
+                             (state.CompactLimit is null
+                                 ? 0
+                                 : Math.Abs((long)mode.CompactLimit!.Value - state.CompactLimit.Value) / 2))
+            .First();
+        return nearest.Index >= 3 ? 2.5 : nearest.Index + 0.5;
+    }
+
+    private static string FormatTokenCount(int? value)
+    {
+        if (value is null) return "model default";
+        return value.Value >= 1_000_000 && value.Value % 1_000_000 == 0
+            ? $"{value.Value / 1_000_000}M"
+            : value.Value % 1_000 == 0
+                ? $"{value.Value / 1_000}K"
+                : value.Value.ToString("N0", CultureInfo.InvariantCulture);
     }
 
     private static string CompactModeLabel(ContextMode mode) => mode.IsDefault
