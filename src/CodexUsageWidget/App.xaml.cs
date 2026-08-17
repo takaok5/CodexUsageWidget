@@ -19,6 +19,8 @@ public partial class App : System.Windows.Application
         var window = new MainWindow();
         MainWindow = window;
         window.Show();
+        if (e.Args.Any(argument => string.Equals(argument, "--context-settings", StringComparison.OrdinalIgnoreCase)))
+            window.Dispatcher.BeginInvoke(window.ShowContextSettings);
     }
 
     protected override void OnExit(ExitEventArgs e)

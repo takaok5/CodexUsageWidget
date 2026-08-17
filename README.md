@@ -4,7 +4,7 @@ A lightweight, Codex-only taskbar widget built with **C#**, **.NET 8**, and
 **WPF**. It reads local Codex session data and keeps the weekly remaining
 allowance visible without opening a usage dashboard.
 
-![ChatGPT Codex Usage Widget v2.0.0](screenshots/chatgpt-codex-usage-widget-v2.0.0.png)
+![ChatGPT Codex Usage Widget v2.1.0](screenshots/chatgpt-codex-usage-widget-v2.1.0.png)
 
 ## Highlights
 
@@ -17,6 +17,10 @@ allowance visible without opening a usage dashboard.
 - Refresh intervals of 30 seconds, 2 minutes, 5 minutes, or manual only.
 - Drag positioning, position lock, display switching, and optional icon pulse.
 - Automatic reattachment after Windows Explorer restarts.
+- Short, four-position Codex work-mode slider embedded directly in the taskbar
+  panel for Default, 300K, 600K, or 1M token context.
+- Live project picker backed by Codex's local `state_*.sqlite` database.
+- Atomic global or project-scoped `config.toml` updates with a one-step backup.
 - No additional sign-in, API key, or browser cookie is required.
 
 ## Run
@@ -27,6 +31,41 @@ allowance visible without opening a usage dashboard.
 The application is self-contained and does not require administrator access.
 Right-click the panel to refresh usage, change the refresh interval, move it,
 lock its position, control icon animation, or exit.
+
+## Codex work modes
+
+Move the short slider inside the taskbar widget to apply a work mode. Click the
+adjacent lightning button to open the compact Global/Project selector above the
+widget. The selector refreshes its project list from Codex every five seconds;
+after choosing a target, the taskbar slider applies to that target as soon as it
+reaches a new position.
+
+You can also right-click the widget and choose **Codex work mode...**. For
+keyboard shortcuts or scripts, launch `CodexTaskbarWidget.exe
+--context-settings` to open the same target selector at startup.
+
+| Mode | Context window | Auto-compaction | Intended use |
+| --- | ---: | ---: | --- |
+| Default | Model default | Model default | No custom context overrides |
+| Balanced | 300,000 | 240,000 | Normal coding tasks |
+| Large Codebase | 600,000 | 500,000 | More repository and tool history |
+| Long-Running Investigation | 1,000,000 | 900,000 | Reverse engineering, migrations, and debugging |
+
+The three custom modes select `gpt-5.6-sol` and update
+`model_context_window` plus `model_auto_compact_token_limit`. **Default**
+removes only those two context keys and leaves every other setting untouched.
+Apply a mode to either:
+
+- the global default at `%USERPROFILE%\.codex\config.toml`; or
+- a project override at `<project>\.codex\config.toml`, optionally updating the
+  global default at the same time.
+
+Codex loads a project override only after the project is trusted. Start a new
+Codex task after changing modes. Before replacing an existing file, the widget
+copies it to `config.toml.codex-usage-widget.bak` in the same directory.
+Default at project scope removes the project override, so the project inherits
+the global context setting. Default at global scope restores the model's own
+standard context and compaction behavior.
 
 ## Start automatically with Windows
 
@@ -42,11 +81,16 @@ entries.
 
 ## Privacy
 
-The widget reads only the known local Codex session location:
+The widget reads usage events from the known local Codex session location:
 
 ```text
 %USERPROFILE%\.codex\sessions
 ```
+
+For the project picker, it reads project working directories from the local
+Codex `state_*.sqlite` database. It never reads conversation text from that
+database. When you move the work-mode slider, it writes only the three documented
+model/context keys in the selected global or project configuration file.
 
 It does not send usage data to the internet. Position, animation, and refresh
 settings are stored in:
@@ -75,6 +119,16 @@ The published self-contained executable is written to:
 ```text
 publish\single\CodexTaskbarWidget.exe
 ```
+
+## Version 2.1.0
+
+- Added the Codex work-mode flyout and four-position context slider, including
+  a non-overriding Default option.
+- Added live project discovery from the local Codex SQLite state database.
+- Added global/project configuration scope, optional combined updates, atomic
+  saves, and automatic backups.
+- Added tests for TOML preservation, profile changes, backups, and project
+  discovery.
 
 ## Version 2.0.0
 

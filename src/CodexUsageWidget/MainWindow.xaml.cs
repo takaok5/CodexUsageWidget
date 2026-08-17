@@ -36,13 +36,15 @@ public partial class MainWindow : Window
     private double _screenLeft;
     private double _screenRight = SystemParameters.PrimaryScreenWidth;
     private double _windowTop;
-    private double _widgetLeft = 205;
+    private double _widgetLeft;
     private double _dipPerPixel = 1;
     private int _dragStartX;
     private double _dragStartLeft;
     private DateTime _lastSessionWriteUtc = DateTime.MinValue;
     private string _activeAnimationKey = string.Empty;
     private string _lastLogMessage = string.Empty;
+    private ContextSettingsWindow? _contextSettingsWindow;
+    private bool _loadingContextMode;
 
     public MainWindow()
     {
@@ -66,6 +68,9 @@ public partial class MainWindow : Window
         MoveRightMenu.Click += (_, _) => SetTaskbarPosition(_screenRight - Width);
         NextDisplayMenu.Click += (_, _) => MoveToNextDisplay();
         RefreshMenu.Click += (_, _) => RefreshUsage();
+        ContextModeMenu.Click += (_, _) => ShowContextSettings();
+        ContextButton.Click += (_, _) => ShowContextSettings();
+        TaskbarModeSlider.ValueChanged += (_, _) => ApplyTaskbarContextMode();
         Refresh30Menu.Click += (_, _) => SetRefreshMode("30 seconds");
         Refresh2MinuteMenu.Click += (_, _) => SetRefreshMode("2 minutes");
         Refresh5MinuteMenu.Click += (_, _) => SetRefreshMode("5 minutes");
@@ -96,7 +101,7 @@ public partial class MainWindow : Window
         _taskbarTimer.Interval = TimeSpan.FromSeconds(1);
         _taskbarTimer.Tick += (_, _) =>
         {
-            nint currentTaskbar = NativeMethods.FindWindow("Shell_TrayWnd", null);
+            nint currentTaskbar = FindTaskbarForSelectedDisplay();
             if (currentTaskbar != _taskbarHandle)
             {
                 SyncDisplayGeometry();
@@ -122,6 +127,7 @@ public partial class MainWindow : Window
         LoadState();
         _widgetLeft = _state.Left;
         ApplyStateToMenus();
+        ReloadTaskbarContextMode();
         SetRefreshTimerInterval();
         SyncDisplayGeometry();
         SetTaskbarPosition(_widgetLeft);
@@ -143,6 +149,133 @@ public partial class MainWindow : Window
         System.Windows.Application.Current.Shutdown();
     }
 
+    internal void ShowContextSettings()
+    {
+        if (_contextSettingsWindow is { IsLoaded: true })
+        {
+            _contextSettingsWindow.Activate();
+            return;
+        }
+
+        _contextSettingsWindow = new ContextSettingsWindow(
+            _state,
+            SaveState,
+            ReloadTaskbarContextMode,
+            GetPopupAnchor);
+        _contextSettingsWindow.Closed += (_, _) => _contextSettingsWindow = null;
+        _contextSettingsWindow.Show();
+    }
+
+    private void ReloadTaskbarContextMode()
+    {
+        ContextMode? configuredMode;
+        bool projectScope = _state.ContextScope == "Project";
+        bool projectAvailable = projectScope &&
+                                !string.IsNullOrWhiteSpace(_state.ContextProjectPath) &&
+                                Directory.Exists(_state.ContextProjectPath);
+
+        if (projectAvailable)
+        {
+            string projectConfig = CodexConfigService.GetProjectConfigPath(_state.ContextProjectPath);
+            configuredMode = CodexConfigService.ReadMode(projectConfig);
+        }
+        else
+        {
+            configuredMode = CodexConfigService.ReadMode(CodexConfigService.GlobalConfigPath);
+        }
+
+        ContextMode mode = configuredMode ?? CodexConfigService.Modes[0];
+        _loadingContextMode = true;
+        TaskbarModeSlider.Value = mode.Index;
+        TaskbarModeText.Text = CompactModeLabel(mode);
+        TaskbarModeSlider.IsEnabled = !projectScope || projectAvailable;
+        _loadingContextMode = false;
+        UpdateContextToolTips(mode, projectScope, projectAvailable);
+    }
+
+    private void ApplyTaskbarContextMode()
+    {
+        ContextMode mode = CodexConfigService.Modes[(int)Math.Round(TaskbarModeSlider.Value)];
+        if (_loadingContextMode) return;
+        TaskbarModeText.Text = CompactModeLabel(mode);
+
+        ConfigWriteResult result;
+        if (_state.ContextScope == "Project")
+        {
+            if (string.IsNullOrWhiteSpace(_state.ContextProjectPath) || !Directory.Exists(_state.ContextProjectPath))
+            {
+                ContextButton.ToolTip = "Choose an available project before moving the context slider.";
+                ReloadTaskbarContextMode();
+                ShowContextSettings();
+                return;
+            }
+
+            result = CodexConfigService.ApplyProject(_state.ContextProjectPath, mode);
+            if (result.Success && _state.ContextAlsoGlobal)
+            {
+                ConfigWriteResult globalResult = CodexConfigService.ApplyGlobal(mode);
+                if (!globalResult.Success)
+                {
+                    string partialMessage = $"Project updated, global update failed: {globalResult.Message}";
+                    ContextButton.ToolTip = partialMessage;
+                    _contextSettingsWindow?.RefreshTargetStatus(partialMessage, false);
+                    return;
+                }
+            }
+        }
+        else
+        {
+            result = CodexConfigService.ApplyGlobal(mode);
+        }
+
+        string message = result.Message;
+        UpdateContextToolTips(mode, _state.ContextScope == "Project", true, message);
+        _contextSettingsWindow?.RefreshTargetStatus(message, result.Success);
+    }
+
+    private void UpdateContextToolTips(
+        ContextMode mode,
+        bool projectScope,
+        bool projectAvailable,
+        string? resultMessage = null)
+    {
+        string target = projectScope
+            ? projectAvailable
+                ? $"Project: {Path.GetFileName(_state.ContextProjectPath)}"
+                : "Project not selected"
+            : "Global defaults";
+        string summary = $"{mode.Name} · {mode.ContextLabel} · {target}";
+        TaskbarModeSlider.ToolTip = resultMessage is null ? summary : $"{resultMessage}\n{summary}";
+        ContextButton.ToolTip = $"Context target: {target}\nClick to choose global or project";
+    }
+
+    private static string CompactModeLabel(ContextMode mode) => mode.IsDefault
+        ? "DEFAULT"
+        : mode.ContextLabel
+            .Replace(" context", string.Empty, StringComparison.Ordinal)
+            .Replace("~", string.Empty, StringComparison.Ordinal);
+
+    private PopupAnchor? GetPopupAnchor()
+    {
+        if (_windowHandle == 0 || !NativeMethods.GetWindowRect(_windowHandle, out NativeMethods.Rect rect))
+            return null;
+
+        System.Windows.Forms.Screen[] screens = System.Windows.Forms.Screen.AllScreens;
+        if (screens.Length == 0) return null;
+        int index = Math.Clamp(_state.ScreenIndex, 0, screens.Length - 1);
+        System.Drawing.Rectangle work = screens[index].WorkingArea;
+        double scale = _dipPerPixel > 0 ? _dipPerPixel : 1;
+        return new PopupAnchor(
+            rect.Left * scale,
+            rect.Top * scale,
+            rect.Right * scale,
+            rect.Bottom * scale,
+            work.Left * scale,
+            work.Top * scale,
+            work.Right * scale,
+            work.Bottom * scale);
+    }
+
     private void LoadState()
     {
         if (!File.Exists(_stateFile)) return;
@@ -160,6 +293,11 @@ public partial class MainWindow : Window
             _state.AnimationSpeed = "Normal";
         if (_state.RefreshMode is not ("30 seconds" or "2 minutes" or "5 minutes" or "Manual only"))
             _state.RefreshMode = "30 seconds";
+        if (_state.LayoutVersion < 2)
+        {
+            _state.Left = 0;
+            _state.LayoutVersion = 2;
+        }
     }
 
     private void SaveState()
@@ -291,7 +429,7 @@ public partial class MainWindow : Window
 
         double left = Math.Clamp(Math.Round(100 - snapshot.Long.UsedPercent), 0, 100);
         PercentText.Text = $"{left:0}%";
-        RemainingBar.Width = left;
+        RemainingBar.Width = 108 * left / 100;
 
         TimeSpan age = DateTimeOffset.Now - snapshot.EventTime;
         bool stale = age.TotalMinutes > 5;
@@ -419,7 +557,11 @@ public partial class MainWindow : Window
         if (_isDragging) return;
         System.Windows.Forms.Screen[] screens = System.Windows.Forms.Screen.AllScreens;
         if (screens.Length == 0) return;
-        if (_state.ScreenIndex < 0 || _state.ScreenIndex >= screens.Length) _state.ScreenIndex = 0;
+        if (_state.ScreenIndex < 0 || _state.ScreenIndex >= screens.Length)
+        {
+            int primaryIndex = Array.FindIndex(screens, screen => screen.Primary);
+            _state.ScreenIndex = primaryIndex >= 0 ? primaryIndex : 0;
+        }
 
         _dipPerPixel = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice.M11 ?? _dipPerPixel;
         var screen = screens[_state.ScreenIndex];
@@ -480,7 +622,7 @@ public partial class MainWindow : Window
     private void AttachWidgetToTaskbar()
     {
         if (_windowHandle == 0) return;
-        nint taskbar = NativeMethods.FindWindow("Shell_TrayWnd", null);
+        nint taskbar = FindTaskbarForSelectedDisplay();
         if (taskbar == 0) return;
 
         long style = NativeMethods.GetWindowLongPtr(_windowHandle, NativeMethods.GwlStyle).ToInt64();
@@ -499,6 +641,21 @@ public partial class MainWindow : Window
             Topmost = true;
             WriteLog("Could not embed widget into the Windows taskbar");
         }
+    }
+
+    private nint FindTaskbarForSelectedDisplay()
+    {
+        System.Windows.Forms.Screen[] screens = System.Windows.Forms.Screen.AllScreens;
+        if (screens.Length == 0) return NativeMethods.FindWindow("Shell_TrayWnd", null);
+        int index = Math.Clamp(_state.ScreenIndex, 0, screens.Length - 1);
+        System.Drawing.Rectangle bounds = screens[index].Bounds;
+        return NativeMethods.FindTaskbarForBounds(new NativeMethods.Rect
+        {
+            Left = bounds.Left,
+            Top = bounds.Top,
+            Right = bounds.Right,
+            Bottom = bounds.Bottom
+        });
     }
 
     private static SolidColorBrush Brush(string color) =>

@@ -1,5 +1,5 @@
-ChatGPT Codex Usage Widget 2.0.0
-Build date: 2026-07-16
+ChatGPT Codex Usage Widget 2.1.0
+Build date: 2026-08-17
 
 Primary label: ChatGPT Codex
 Runtime: C# / .NET 8 / WPF

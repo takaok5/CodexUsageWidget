@@ -11,3 +11,5 @@ publish/
 dist/
 .vs/
 *.user
+artifacts/
+TestResults/

@@ -1,9 +1,12 @@
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace CodexUsageWidget;
 
 internal static class NativeMethods
 {
+    private delegate bool EnumWindowsCallback(nint window, nint parameter);
+
     internal const int GwlStyle = -16;
     internal const long WsChild = 0x40000000L;
     internal const long WsPopup = 0x80000000L;
@@ -19,6 +22,32 @@ internal static class NativeMethods
         internal int Bottom;
     }
 
+    internal static nint FindTaskbarForBounds(Rect screenBounds)
+    {
+        nint bestWindow = 0;
+        long bestOverlap = 0;
+        EnumWindows((window, _) =>
+        {
+            var className = new StringBuilder(64);
+            if (GetClassName(window, className, className.Capacity) == 0) return true;
+            string value = className.ToString();
+            if (value is not ("Shell_TrayWnd" or "Shell_SecondaryTrayWnd")) return true;
+            if (!GetWindowRect(window, out Rect taskbarRect)) return true;
+
+            int overlapWidth = Math.Max(0, Math.Min(screenBounds.Right, taskbarRect.Right) -
+                                           Math.Max(screenBounds.Left, taskbarRect.Left));
+            int overlapHeight = Math.Max(0, Math.Min(screenBounds.Bottom, taskbarRect.Bottom) -
+                                            Math.Max(screenBounds.Top, taskbarRect.Top));
+            long overlap = (long)overlapWidth * overlapHeight;
+            if (overlap <= bestOverlap) return true;
+            bestOverlap = overlap;
+            bestWindow = window;
+            return true;
+        }, 0);
+
+        return bestWindow != 0 ? bestWindow : FindWindow("Shell_TrayWnd", null);
+    }
+
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool SetWindowPos(
@@ -29,6 +58,13 @@ internal static class NativeMethods
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     internal static extern nint FindWindow(string className, string? windowName);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnumWindows(EnumWindowsCallback callback, nint parameter);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassName(nint window, StringBuilder className, int maxCount);
 
     [DllImport("user32.dll", SetLastError = true)]
     internal static extern nint SetParent(nint child, nint newParent);
