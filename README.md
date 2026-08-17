@@ -15,7 +15,7 @@ allowance visible without opening a usage dashboard.
 - Live, stale, no-data, and Codex-not-running states.
 - Green, amber, red, and gray quota status colors.
 - Refresh intervals of 30 seconds, 2 minutes, 5 minutes, or manual only.
-- Drag positioning, position lock, display switching, and optional icon pulse.
+- Drag positioning, position lock, and display switching.
 - Automatic reattachment after Windows Explorer restarts.
 - Short, four-position Codex work-mode slider embedded directly in the taskbar
   panel for Default, 300K, 600K, or 1M token context.
@@ -124,6 +124,8 @@ publish\single\CodexTaskbarWidget.exe
 
 - Added the Codex work-mode flyout and four-position context slider, including
   a non-overriding Default option.
+- Refined the taskbar layout by removing redundant branding and placing the
+  quota percentage directly beside the usage bar.
 - Added live project discovery from the local Codex SQLite state database.
 - Added global/project configuration scope, optional combined updates, atomic
   saves, and automatic backups.

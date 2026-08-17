@@ -6,7 +6,6 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
-using System.Windows.Media.Animation;
 using System.Windows.Threading;
 
 namespace CodexUsageWidget;
@@ -41,7 +40,6 @@ public partial class MainWindow : Window
     private int _dragStartX;
     private double _dragStartLeft;
     private DateTime _lastSessionWriteUtc = DateTime.MinValue;
-    private string _activeAnimationKey = string.Empty;
     private string _lastLogMessage = string.Empty;
     private ContextSettingsWindow? _contextSettingsWindow;
     private bool _loadingContextMode;
@@ -81,21 +79,11 @@ public partial class MainWindow : Window
             Root.Cursor = _state.Locked ? System.Windows.Input.Cursors.Arrow : System.Windows.Input.Cursors.SizeWE;
             SaveState();
         };
-        AnimateIconMenu.Click += (_, _) =>
-        {
-            _state.Animate = AnimateIconMenu.IsChecked;
-            SetIconAnimation();
-            SaveState();
-        };
-        AnimationSlowMenu.Click += (_, _) => SetAnimationSpeed("Slow");
-        AnimationNormalMenu.Click += (_, _) => SetAnimationSpeed("Normal");
-        AnimationFastMenu.Click += (_, _) => SetAnimationSpeed("Fast");
         ExitMenu.Click += (_, _) => Close();
 
         _refreshTimer.Tick += (_, _) =>
         {
             if (_state.RefreshMode != "Manual only") RefreshUsage();
-            SetIconAnimation();
             SyncDisplayGeometry();
         };
         _taskbarTimer.Interval = TimeSpan.FromSeconds(1);
@@ -132,7 +120,6 @@ public partial class MainWindow : Window
         SyncDisplayGeometry();
         SetTaskbarPosition(_widgetLeft);
         AttachWidgetToTaskbar();
-        SetIconAnimation();
         RefreshUsage();
         _lastSessionWriteUtc = UsageReader.GetLatestWriteTimeUtc();
         _refreshTimer.Start();
@@ -333,10 +320,6 @@ public partial class MainWindow : Window
     {
         LockPositionMenu.IsChecked = _state.Locked;
         Root.Cursor = _state.Locked ? System.Windows.Input.Cursors.Arrow : System.Windows.Input.Cursors.SizeWE;
-        AnimateIconMenu.IsChecked = _state.Animate;
-        AnimationSlowMenu.IsChecked = _state.AnimationSpeed == "Slow";
-        AnimationNormalMenu.IsChecked = _state.AnimationSpeed == "Normal";
-        AnimationFastMenu.IsChecked = _state.AnimationSpeed == "Fast";
         Refresh30Menu.IsChecked = _state.RefreshMode == "30 seconds";
         Refresh2MinuteMenu.IsChecked = _state.RefreshMode == "2 minutes";
         Refresh5MinuteMenu.IsChecked = _state.RefreshMode == "5 minutes";
@@ -361,57 +344,6 @@ public partial class MainWindow : Window
             _ => 30
         };
         _refreshTimer.Interval = TimeSpan.FromSeconds(seconds);
-    }
-
-    private void SetAnimationSpeed(string speed)
-    {
-        _state.AnimationSpeed = speed;
-        _activeAnimationKey = string.Empty;
-        SetIconAnimation();
-        SaveState();
-    }
-
-    private void SetIconAnimation()
-    {
-        bool allowMotion = SystemParameters.ClientAreaAnimation;
-        try
-        {
-            var power = System.Windows.Forms.SystemInformation.PowerStatus;
-            if (power.PowerLineStatus == System.Windows.Forms.PowerLineStatus.Offline &&
-                power.BatteryLifePercent is >= 0 and <= 0.20f)
-            {
-                allowMotion = false;
-            }
-        }
-        catch
-        {
-        }
-
-        bool enabled = _state.Animate && allowMotion;
-        string key = enabled ? _state.AnimationSpeed : "Off";
-        if (key == _activeAnimationKey) return;
-
-        IconHost.BeginAnimation(OpacityProperty, null);
-        IconHost.Opacity = 1;
-        if (enabled)
-        {
-            double seconds = _state.AnimationSpeed switch
-            {
-                "Slow" => 2.4,
-                "Fast" => 0.9,
-                _ => 1.6
-            };
-            var animation = new DoubleAnimation(1, 0.72, TimeSpan.FromSeconds(seconds))
-            {
-                AutoReverse = true,
-                RepeatBehavior = RepeatBehavior.Forever,
-                EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
-            };
-            IconHost.BeginAnimation(OpacityProperty, animation);
-        }
-
-        _activeAnimationKey = key;
-        ApplyStateToMenus();
     }
 
     private void RefreshUsage()

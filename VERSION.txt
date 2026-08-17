@@ -1,6 +1,6 @@
 ChatGPT Codex Usage Widget 2.1.0
 Build date: 2026-08-17
 
-Primary label: ChatGPT Codex
+Primary label: Weekly quota and context mode
 Runtime: C# / .NET 8 / WPF
 Package: Self-contained Windows x64 EXE
