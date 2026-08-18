@@ -6,7 +6,6 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
-using System.Windows.Media.Animation;
 using System.Windows.Threading;
 
 namespace CodexUsageWidget;
@@ -36,13 +35,13 @@ public partial class MainWindow : Window
     private double _screenLeft;
     private double _screenRight = SystemParameters.PrimaryScreenWidth;
     private double _windowTop;
-    private double _widgetLeft = 205;
+    private double _widgetLeft;
     private double _dipPerPixel = 1;
     private int _dragStartX;
     private double _dragStartLeft;
     private DateTime _lastSessionWriteUtc = DateTime.MinValue;
-    private string _activeAnimationKey = string.Empty;
     private string _lastLogMessage = string.Empty;
+    private bool _loadingContextMode;
 
     public MainWindow()
     {
@@ -66,6 +65,7 @@ public partial class MainWindow : Window
         MoveRightMenu.Click += (_, _) => SetTaskbarPosition(_screenRight - Width);
         NextDisplayMenu.Click += (_, _) => MoveToNextDisplay();
         RefreshMenu.Click += (_, _) => RefreshUsage();
+        TaskbarModeSlider.ValueChanged += (_, _) => ApplyTaskbarContextMode();
         Refresh30Menu.Click += (_, _) => SetRefreshMode("30 seconds");
         Refresh2MinuteMenu.Click += (_, _) => SetRefreshMode("2 minutes");
         Refresh5MinuteMenu.Click += (_, _) => SetRefreshMode("5 minutes");
@@ -76,27 +76,17 @@ public partial class MainWindow : Window
             Root.Cursor = _state.Locked ? System.Windows.Input.Cursors.Arrow : System.Windows.Input.Cursors.SizeWE;
             SaveState();
         };
-        AnimateIconMenu.Click += (_, _) =>
-        {
-            _state.Animate = AnimateIconMenu.IsChecked;
-            SetIconAnimation();
-            SaveState();
-        };
-        AnimationSlowMenu.Click += (_, _) => SetAnimationSpeed("Slow");
-        AnimationNormalMenu.Click += (_, _) => SetAnimationSpeed("Normal");
-        AnimationFastMenu.Click += (_, _) => SetAnimationSpeed("Fast");
         ExitMenu.Click += (_, _) => Close();
 
         _refreshTimer.Tick += (_, _) =>
         {
             if (_state.RefreshMode != "Manual only") RefreshUsage();
-            SetIconAnimation();
             SyncDisplayGeometry();
         };
         _taskbarTimer.Interval = TimeSpan.FromSeconds(1);
         _taskbarTimer.Tick += (_, _) =>
         {
-            nint currentTaskbar = NativeMethods.FindWindow("Shell_TrayWnd", null);
+            nint currentTaskbar = FindTaskbarForSelectedDisplay();
             if (currentTaskbar != _taskbarHandle)
             {
                 SyncDisplayGeometry();
@@ -122,11 +112,11 @@ public partial class MainWindow : Window
         LoadState();
         _widgetLeft = _state.Left;
         ApplyStateToMenus();
+        ReloadTaskbarContextMode();
         SetRefreshTimerInterval();
         SyncDisplayGeometry();
         SetTaskbarPosition(_widgetLeft);
         AttachWidgetToTaskbar();
-        SetIconAnimation();
         RefreshUsage();
         _lastSessionWriteUtc = UsageReader.GetLatestWriteTimeUtc();
         _refreshTimer.Start();
@@ -143,6 +133,75 @@ public partial class MainWindow : Window
         System.Windows.Application.Current.Shutdown();
     }
 
+    private void ReloadTaskbarContextMode()
+    {
+        ContextConfigState state = CodexConfigService.ReadState(CodexConfigService.GlobalConfigPath);
+        _loadingContextMode = true;
+        TaskbarModeSlider.Value = state.IsCustom ? CustomSliderPosition(state) : state.Mode!.Index;
+        TaskbarModeText.Text = state.IsCustom ? "CUSTOM" : CompactModeLabel(state.Mode!);
+        TaskbarModeSlider.IsEnabled = true;
+        _loadingContextMode = false;
+        if (state.IsCustom)
+            UpdateCustomContextToolTip(state);
+        else
+            UpdateContextToolTip(state.Mode!);
+    }
+
+    private void ApplyTaskbarContextMode()
+    {
+        ContextMode mode = CodexConfigService.Modes[(int)Math.Round(TaskbarModeSlider.Value)];
+        if (_loadingContextMode) return;
+        TaskbarModeText.Text = CompactModeLabel(mode);
+
+        ConfigWriteResult result = CodexConfigService.ApplyGlobal(mode);
+        UpdateContextToolTip(mode, result.Message);
+    }
+
+    private void UpdateContextToolTip(ContextMode mode, string? resultMessage = null)
+    {
+        string summary = $"{mode.Name} · {mode.ContextLabel} · Global Codex setting";
+        TaskbarModeSlider.ToolTip = resultMessage is null ? summary : $"{resultMessage}\n{summary}";
+    }
+
+    private void UpdateCustomContextToolTip(ContextConfigState state)
+    {
+        string detail = state.ReadFailed
+            ? "Could not read the current context settings"
+            : $"{FormatTokenCount(state.ContextWindow)} context · {FormatTokenCount(state.CompactLimit)} auto-compaction";
+        TaskbarModeSlider.ToolTip =
+            $"Custom · {detail} · config.toml is preserved until you move the slider";
+    }
+
+    private static double CustomSliderPosition(ContextConfigState state)
+    {
+        if (state.ContextWindow is null) return 0.5;
+
+        ContextMode nearest = CodexConfigService.Modes
+            .Where(mode => !mode.IsDefault)
+            .OrderBy(mode => Math.Abs((long)mode.ContextWindow!.Value - state.ContextWindow.Value) +
+                             (state.CompactLimit is null
+                                 ? 0
+                                 : Math.Abs((long)mode.CompactLimit!.Value - state.CompactLimit.Value) / 2))
+            .First();
+        return nearest.Index >= 3 ? 2.5 : nearest.Index + 0.5;
+    }
+
+    private static string FormatTokenCount(int? value)
+    {
+        if (value is null) return "model default";
+        return value.Value >= 1_000_000 && value.Value % 1_000_000 == 0
+            ? $"{value.Value / 1_000_000}M"
+            : value.Value % 1_000 == 0
+                ? $"{value.Value / 1_000}K"
+                : value.Value.ToString("N0", CultureInfo.InvariantCulture);
+    }
+
+    private static string CompactModeLabel(ContextMode mode) => mode.IsDefault
+        ? "DEFAULT"
+        : mode.ContextLabel
+            .Replace(" context", string.Empty, StringComparison.Ordinal)
+            .Replace("~", string.Empty, StringComparison.Ordinal);
+
     private void LoadState()
     {
         if (!File.Exists(_stateFile)) return;
@@ -156,10 +215,13 @@ public partial class MainWindow : Window
             WriteLog($"Could not load settings: {exception.Message}");
         }
 
-        if (_state.AnimationSpeed is not ("Slow" or "Normal" or "Fast"))
-            _state.AnimationSpeed = "Normal";
         if (_state.RefreshMode is not ("30 seconds" or "2 minutes" or "5 minutes" or "Manual only"))
             _state.RefreshMode = "30 seconds";
+        if (_state.LayoutVersion < 2)
+        {
+            _state.Left = 0;
+            _state.LayoutVersion = 2;
+        }
     }
 
     private void SaveState()
@@ -195,10 +257,6 @@ public partial class MainWindow : Window
     {
         LockPositionMenu.IsChecked = _state.Locked;
         Root.Cursor = _state.Locked ? System.Windows.Input.Cursors.Arrow : System.Windows.Input.Cursors.SizeWE;
-        AnimateIconMenu.IsChecked = _state.Animate;
-        AnimationSlowMenu.IsChecked = _state.AnimationSpeed == "Slow";
-        AnimationNormalMenu.IsChecked = _state.AnimationSpeed == "Normal";
-        AnimationFastMenu.IsChecked = _state.AnimationSpeed == "Fast";
         Refresh30Menu.IsChecked = _state.RefreshMode == "30 seconds";
         Refresh2MinuteMenu.IsChecked = _state.RefreshMode == "2 minutes";
         Refresh5MinuteMenu.IsChecked = _state.RefreshMode == "5 minutes";
@@ -225,57 +283,6 @@ public partial class MainWindow : Window
         _refreshTimer.Interval = TimeSpan.FromSeconds(seconds);
     }
 
-    private void SetAnimationSpeed(string speed)
-    {
-        _state.AnimationSpeed = speed;
-        _activeAnimationKey = string.Empty;
-        SetIconAnimation();
-        SaveState();
-    }
-
-    private void SetIconAnimation()
-    {
-        bool allowMotion = SystemParameters.ClientAreaAnimation;
-        try
-        {
-            var power = System.Windows.Forms.SystemInformation.PowerStatus;
-            if (power.PowerLineStatus == System.Windows.Forms.PowerLineStatus.Offline &&
-                power.BatteryLifePercent is >= 0 and <= 0.20f)
-            {
-                allowMotion = false;
-            }
-        }
-        catch
-        {
-        }
-
-        bool enabled = _state.Animate && allowMotion;
-        string key = enabled ? _state.AnimationSpeed : "Off";
-        if (key == _activeAnimationKey) return;
-
-        IconHost.BeginAnimation(OpacityProperty, null);
-        IconHost.Opacity = 1;
-        if (enabled)
-        {
-            double seconds = _state.AnimationSpeed switch
-            {
-                "Slow" => 2.4,
-                "Fast" => 0.9,
-                _ => 1.6
-            };
-            var animation = new DoubleAnimation(1, 0.72, TimeSpan.FromSeconds(seconds))
-            {
-                AutoReverse = true,
-                RepeatBehavior = RepeatBehavior.Forever,
-                EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
-            };
-            IconHost.BeginAnimation(OpacityProperty, animation);
-        }
-
-        _activeAnimationKey = key;
-        ApplyStateToMenus();
-    }
-
     private void RefreshUsage()
     {
         UsageSnapshot? snapshot = UsageReader.GetLatestSnapshot();
@@ -291,7 +298,7 @@ public partial class MainWindow : Window
 
         double left = Math.Clamp(Math.Round(100 - snapshot.Long.UsedPercent), 0, 100);
         PercentText.Text = $"{left:0}%";
-        RemainingBar.Width = left;
+        RemainingBar.Width = 108 * left / 100;
 
         TimeSpan age = DateTimeOffset.Now - snapshot.EventTime;
         bool stale = age.TotalMinutes > 5;
@@ -419,7 +426,11 @@ public partial class MainWindow : Window
         if (_isDragging) return;
         System.Windows.Forms.Screen[] screens = System.Windows.Forms.Screen.AllScreens;
         if (screens.Length == 0) return;
-        if (_state.ScreenIndex < 0 || _state.ScreenIndex >= screens.Length) _state.ScreenIndex = 0;
+        if (_state.ScreenIndex < 0 || _state.ScreenIndex >= screens.Length)
+        {
+            int primaryIndex = Array.FindIndex(screens, screen => screen.Primary);
+            _state.ScreenIndex = primaryIndex >= 0 ? primaryIndex : 0;
+        }
 
         _dipPerPixel = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice.M11 ?? _dipPerPixel;
         var screen = screens[_state.ScreenIndex];
@@ -480,7 +491,7 @@ public partial class MainWindow : Window
     private void AttachWidgetToTaskbar()
     {
         if (_windowHandle == 0) return;
-        nint taskbar = NativeMethods.FindWindow("Shell_TrayWnd", null);
+        nint taskbar = FindTaskbarForSelectedDisplay();
         if (taskbar == 0) return;
 
         long style = NativeMethods.GetWindowLongPtr(_windowHandle, NativeMethods.GwlStyle).ToInt64();
@@ -499,6 +510,21 @@ public partial class MainWindow : Window
             Topmost = true;
             WriteLog("Could not embed widget into the Windows taskbar");
         }
+    }
+
+    private nint FindTaskbarForSelectedDisplay()
+    {
+        System.Windows.Forms.Screen[] screens = System.Windows.Forms.Screen.AllScreens;
+        if (screens.Length == 0) return NativeMethods.FindWindow("Shell_TrayWnd", null);
+        int index = Math.Clamp(_state.ScreenIndex, 0, screens.Length - 1);
+        System.Drawing.Rectangle bounds = screens[index].Bounds;
+        return NativeMethods.FindTaskbarForBounds(new NativeMethods.Rect
+        {
+            Left = bounds.Left,
+            Top = bounds.Top,
+            Right = bounds.Right,
+            Bottom = bounds.Bottom
+        });
     }
 
     private static SolidColorBrush Brush(string color) =>
