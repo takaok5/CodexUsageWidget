@@ -185,6 +185,48 @@ public sealed class CodexConfigServiceTests : IDisposable
         Assert.Equal(original, File.ReadAllText(configPath));
     }
 
+    [Fact]
+    public void UsageReaderSelectsTheNewestTokenCountAcrossSessions()
+    {
+        string olderEventPath = Path.Combine(_testDirectory, "older-event.jsonl");
+        string newerEventPath = Path.Combine(_testDirectory, "newer-event.jsonl");
+        File.WriteAllText(olderEventPath, TokenCountLine("2026-08-20T01:00:00Z", 40));
+        File.WriteAllText(newerEventPath, TokenCountLine("2026-08-20T02:00:00Z", 10));
+
+        File.SetLastWriteTimeUtc(olderEventPath, DateTime.UtcNow);
+        File.SetLastWriteTimeUtc(newerEventPath, DateTime.UtcNow.AddMinutes(-10));
+
+        UsageSnapshot? snapshot = UsageReader.GetLatestSnapshot(_testDirectory);
+
+        Assert.NotNull(snapshot);
+        Assert.Equal(10, snapshot.Long.UsedPercent);
+        Assert.Equal(DateTimeOffset.Parse("2026-08-20T02:00:00Z"), snapshot.EventTime.ToUniversalTime());
+    }
+
+    [Fact]
+    public void UsageReaderAcceptsMissingShortLimitAndSkipsIncompleteJson()
+    {
+        string sessionPath = Path.Combine(_testDirectory, "session.jsonl");
+        File.WriteAllText(
+            sessionPath,
+            "{\"payload\":\n" + TokenCountLine("2026-08-20T03:00:00Z", 25, includeShortLimit: false));
+
+        UsageSnapshot? snapshot = UsageReader.GetLatestSnapshot(_testDirectory);
+
+        Assert.NotNull(snapshot);
+        Assert.Equal(25, snapshot.Long.UsedPercent);
+        Assert.Null(snapshot.Short);
+    }
+
+    private static string TokenCountLine(string timestamp, int usedPercent, bool includeShortLimit = true)
+    {
+        string secondary = includeShortLimit
+            ? ",\"secondary\":{\"used_percent\":15,\"window_minutes\":300,\"resets_at\":1787200000}"
+            : ",\"secondary\":null";
+        return
+            $"{{\"timestamp\":\"{timestamp}\",\"payload\":{{\"type\":\"token_count\",\"rate_limits\":{{\"primary\":{{\"used_percent\":{usedPercent},\"window_minutes\":10080,\"resets_at\":1787200000}}{secondary}}}}}}}{Environment.NewLine}";
+    }
+
     private static int ReadCatalogNumber(string catalogPath, string key)
     {
         JsonNode root = JsonNode.Parse(File.ReadAllText(catalogPath))!;

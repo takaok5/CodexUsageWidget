@@ -22,6 +22,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _refreshTimer = new();
     private readonly DispatcherTimer _taskbarTimer = new();
     private readonly DispatcherTimer _sessionTimer = new();
+    private readonly DispatcherTimer _refreshFeedbackTimer = new();
     private readonly string _configDirectory;
     private readonly string _stateFile;
     private readonly string _logFile;
@@ -39,9 +40,10 @@ public partial class MainWindow : Window
     private double _dipPerPixel = 1;
     private int _dragStartX;
     private double _dragStartLeft;
-    private DateTime _lastSessionWriteUtc = DateTime.MinValue;
     private string _lastLogMessage = string.Empty;
     private bool _loadingContextMode;
+    private FileSystemWatcher? _sessionWatcher;
+    private bool _sessionRefreshQueued;
 
     public MainWindow()
     {
@@ -64,7 +66,7 @@ public partial class MainWindow : Window
         PlaceWeatherMenu.Click += (_, _) => SetTaskbarPosition(_screenLeft + 205);
         MoveRightMenu.Click += (_, _) => SetTaskbarPosition(_screenRight - Width);
         NextDisplayMenu.Click += (_, _) => MoveToNextDisplay();
-        RefreshMenu.Click += (_, _) => RefreshUsage();
+        RefreshMenu.Click += (_, _) => RefreshUsage(manualRequest: true);
         TaskbarModeSlider.ValueChanged += (_, _) => ApplyTaskbarContextMode();
         Refresh30Menu.Click += (_, _) => SetRefreshMode("30 seconds");
         Refresh2MinuteMenu.Click += (_, _) => SetRefreshMode("2 minutes");
@@ -93,15 +95,19 @@ public partial class MainWindow : Window
                 AttachWidgetToTaskbar();
             }
         };
-        _sessionTimer.Interval = TimeSpan.FromSeconds(2);
+        _sessionTimer.Interval = TimeSpan.FromMilliseconds(500);
         _sessionTimer.Tick += (_, _) =>
         {
-            DateTime latest = UsageReader.GetLatestWriteTimeUtc();
-            if (latest > _lastSessionWriteUtc)
-            {
-                _lastSessionWriteUtc = latest;
-                RefreshUsage();
-            }
+            _sessionTimer.Stop();
+            if (!_sessionRefreshQueued || _state.RefreshMode == "Manual only") return;
+            _sessionRefreshQueued = false;
+            RefreshUsage();
+        };
+        _refreshFeedbackTimer.Interval = TimeSpan.FromSeconds(6);
+        _refreshFeedbackTimer.Tick += (_, _) =>
+        {
+            _refreshFeedbackTimer.Stop();
+            RefreshMenu.Header = "Refresh usage";
         };
     }
 
@@ -114,14 +120,13 @@ public partial class MainWindow : Window
         ApplyStateToMenus();
         ReloadTaskbarContextMode();
         SetRefreshTimerInterval();
+        ConfigureSessionMonitoring();
         SyncDisplayGeometry();
         SetTaskbarPosition(_widgetLeft);
         AttachWidgetToTaskbar();
         RefreshUsage();
-        _lastSessionWriteUtc = UsageReader.GetLatestWriteTimeUtc();
         _refreshTimer.Start();
         _taskbarTimer.Start();
-        _sessionTimer.Start();
     }
 
     private void OnClosed(object? sender, EventArgs e)
@@ -129,6 +134,8 @@ public partial class MainWindow : Window
         _refreshTimer.Stop();
         _taskbarTimer.Stop();
         _sessionTimer.Stop();
+        _refreshFeedbackTimer.Stop();
+        _sessionWatcher?.Dispose();
         SaveState();
         System.Windows.Application.Current.Shutdown();
     }
@@ -268,6 +275,7 @@ public partial class MainWindow : Window
         _state.RefreshMode = mode;
         ApplyStateToMenus();
         SetRefreshTimerInterval();
+        ConfigureSessionMonitoring();
         SaveState();
     }
 
@@ -283,8 +291,51 @@ public partial class MainWindow : Window
         _refreshTimer.Interval = TimeSpan.FromSeconds(seconds);
     }
 
-    private void RefreshUsage()
+    private void ConfigureSessionMonitoring()
     {
+        _sessionRefreshQueued = false;
+        _sessionTimer.Stop();
+        _sessionWatcher?.Dispose();
+        _sessionWatcher = null;
+        if (_state.RefreshMode == "Manual only" || !Directory.Exists(UsageReader.SessionRoot)) return;
+
+        try
+        {
+            _sessionWatcher = new FileSystemWatcher(UsageReader.SessionRoot, "*.jsonl")
+            {
+                IncludeSubdirectories = true,
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+                EnableRaisingEvents = true
+            };
+            _sessionWatcher.Changed += OnSessionFileChanged;
+            _sessionWatcher.Created += OnSessionFileChanged;
+            _sessionWatcher.Renamed += OnSessionFileRenamed;
+            _sessionWatcher.Error += (_, _) => QueueSessionRefresh();
+        }
+        catch (Exception exception)
+        {
+            WriteLog($"Could not monitor Codex sessions: {exception.Message}");
+        }
+    }
+
+    private void OnSessionFileChanged(object sender, FileSystemEventArgs e) => QueueSessionRefresh();
+
+    private void OnSessionFileRenamed(object sender, RenamedEventArgs e) => QueueSessionRefresh();
+
+    private void QueueSessionRefresh()
+    {
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (_state.RefreshMode == "Manual only") return;
+            _sessionRefreshQueued = true;
+            _sessionTimer.Stop();
+            _sessionTimer.Start();
+        });
+    }
+
+    private void RefreshUsage(bool manualRequest = false)
+    {
+        DateTimeOffset checkedAt = DateTimeOffset.Now;
         UsageSnapshot? snapshot = UsageReader.GetLatestSnapshot();
         if (snapshot is null)
         {
@@ -293,6 +344,7 @@ public partial class MainWindow : Window
             RemainingBar.Width = 0;
             Root.ToolTip = "ChatGPT Codex - No usage data found";
             WriteLog("No Codex usage data found");
+            if (manualRequest) ShowRefreshFeedback(checkedAt, hasUsageData: false);
             return;
         }
 
@@ -336,9 +388,19 @@ public partial class MainWindow : Window
         }
 
         string tooltip = $"ChatGPT Codex - 7D {left:0}% left; 5H {shortText}% left; {resetText}; " +
-                         $"{freshness}; updated {snapshot.EventTime:HH:mm:ss}";
+                         $"{freshness}; Codex data {snapshot.EventTime:HH:mm:ss}; checked {checkedAt:HH:mm:ss}";
         if (!IsCodexRunning()) tooltip += "; Codex is not running";
         Root.ToolTip = tooltip;
+        if (manualRequest) ShowRefreshFeedback(checkedAt, hasUsageData: true);
+    }
+
+    private void ShowRefreshFeedback(DateTimeOffset checkedAt, bool hasUsageData)
+    {
+        RefreshMenu.Header = hasUsageData
+            ? $"Usage checked {checkedAt:HH:mm:ss}"
+            : $"Checked {checkedAt:HH:mm:ss} - no data";
+        _refreshFeedbackTimer.Stop();
+        _refreshFeedbackTimer.Start();
     }
 
     private static bool IsCodexRunning()
