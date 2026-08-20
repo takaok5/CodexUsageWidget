@@ -1,108 +1,127 @@
-# ChatGPT Codex Usage Widget for Windows 11
+# ChatGPT Codex Usage Widget for Windows
 
-A lightweight, Codex-only taskbar widget built with **C#**, **.NET 8**, and
-**WPF**. It reads local Codex session data and keeps the weekly remaining
-allowance visible without opening a usage dashboard.
+<p align="center">
+  <strong>A compact, local-first Windows taskbar companion for checking Codex usage and choosing a context mode without opening a dashboard.</strong>
+</p>
 
-![ChatGPT Codex Usage Widget v2.1.0](screenshots/chatgpt-codex-usage-widget-v2.1.0.png)
+<p align="center">
+  <a href="https://github.com/anekhirun/CodexUsageWidget/releases/latest">Download the latest Windows x64 release</a>
+  &nbsp;·&nbsp;
+  <a href="CHANGELOG.md">View the changelog</a>
+</p>
 
-## Highlights
+<p align="center">
+  <img alt="Latest release" src="https://img.shields.io/github/v/release/anekhirun/CodexUsageWidget?display_name=tag&sort=semver">
+  <img alt="Windows 10 or 11" src="https://img.shields.io/badge/Windows-10%2F11-0078D4">
+  <img alt=".NET 8" src="https://img.shields.io/badge/.NET-8-512BD4">
+  <img alt="Local-first" src="https://img.shields.io/badge/Data-local--first-2EA44F">
+</p>
 
-- Native C#/.NET 8 WPF application—no PowerShell runtime or companion script.
-- Self-contained Windows x64 EXE; users do not need to install .NET separately.
-- Compact taskbar panel with weekly remaining percentage and reset date.
-- 5-hour and 7-day usage details in the tooltip.
-- Live, stale, no-data, and Codex-not-running states.
-- Green, amber, red, and gray quota status colors.
-- Refresh intervals of 30 seconds, 2 minutes, 5 minutes, or manual only.
-- Event-driven session updates with cached parsing for lower disk activity.
-- Manual refresh feedback that distinguishes the check time from Codex's data time.
-- Drag positioning, position lock, and display switching.
-- Automatic reattachment after Windows Explorer restarts.
-- Short, four-position Codex work-mode slider embedded directly in the taskbar
-  panel for Default, 300K, 600K, or 1M token context.
-- Atomic updates to the user-level Codex `config.toml` with a one-step backup.
-- Automatic synchronization of a configured `model_catalog_json`, so a custom
-  catalog cannot silently clamp the selected context window.
-- No additional sign-in, API key, or browser cookie is required.
+![ChatGPT Codex Usage Widget on the Windows taskbar](screenshots/v2.1.1/context-mode-default.png)
 
-## Run
+## Start in under a minute
 
-1. Download and extract the release ZIP.
-2. Double-click `CodexTaskbarWidget.exe`.
+1. Download and extract the latest Windows x64 ZIP from [Releases](https://github.com/anekhirun/CodexUsageWidget/releases/latest).
+2. Double-click **CodexTaskbarWidget.exe**.
+3. Right-click the widget to refresh usage, choose a refresh interval, move it, lock it, or exit.
 
-The application is self-contained and does not require administrator access.
-Right-click the panel to refresh usage, change the refresh interval, move it,
-lock its position, or exit.
+No administrator access, API key, browser cookie, or .NET installation is required.
 
-## Codex work modes
+## What the widget shows
 
-Move the short slider inside the taskbar widget to apply a work mode globally.
-Each slider position updates the user-level Codex configuration as soon as it
-is selected.
+| Signal | What it means |
+| --- | --- |
+| Weekly remaining | Remaining quota from the current long-window Codex rate limit. |
+| Reset date | The next reset date when Codex provides it. |
+| 5-hour remaining | Available in the tooltip when Codex supplies a short-window limit. |
+| Freshness | The tooltip separates the latest Codex data time from the time the widget last checked it. |
+| Status color | Green, amber, red, or gray indicates healthy, lower, critical, or stale data. |
 
-| Mode | Context window | Auto-compaction | Intended use |
+The widget reads local Codex session events. It does not call a usage API or send your usage data anywhere.
+
+## Refresh and data freshness
+
+Use the right-click menu to choose the refresh behavior that fits your workflow.
+
+![Refresh interval menu](screenshots/v2.1.1/refresh-interval-menu.png)
+
+| Setting | Behavior |
+| --- | --- |
+| 30 seconds | Checks usage frequently and reacts to local session-file changes. |
+| 2 minutes / 5 minutes | Uses less background activity. |
+| Manual only | Refreshes only when you choose **Refresh usage**. |
+
+A refresh can succeed without changing the percentage: Codex may not have written newer rate-limit data yet, and the source may report whole-number percentages.
+
+## Codex context modes
+
+The four-position slider applies a global context profile to new Codex tasks. Existing tasks keep the configuration snapshot with which they started.
+
+<table>
+  <tr>
+    <td align="center"><strong>Default</strong><br><img src="screenshots/v2.1.1/context-mode-default.png" alt="Default context mode" width="360"></td>
+    <td align="center"><strong>Balanced · 300K</strong><br><img src="screenshots/v2.1.1/context-mode-300k.png" alt="Balanced 300K context mode" width="360"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Large Codebase · 600K</strong><br><img src="screenshots/v2.1.1/context-mode-600k.png" alt="Large Codebase 600K context mode" width="360"></td>
+    <td align="center"><strong>Long-Running Investigation · 1M</strong><br><img src="screenshots/v2.1.1/context-mode-1m.png" alt="Long-Running Investigation 1M context mode" width="360"></td>
+  </tr>
+</table>
+
+| Mode | Context window | Auto-compaction | Best for |
 | --- | ---: | ---: | --- |
-| Default | Model default | Model default | No custom context overrides |
-| Balanced | 300,000 | 240,000 | Normal coding tasks |
-| Large Codebase | 600,000 | 500,000 | More repository and tool history |
-| Long-Running Investigation | 1,000,000 | 900,000 | Reverse engineering, migrations, and debugging |
+| Default | Model default | Standard behavior | Removing custom context overrides. |
+| Balanced | 300,000 | 240,000 | Everyday coding tasks. |
+| Large Codebase | 600,000 | 500,000 | More repository and tool history. |
+| Long-Running Investigation | 1,000,000 | 900,000 | Investigations, migrations, and deep debugging. |
 
-The three custom modes update `model_context_window` plus
-`model_auto_compact_token_limit` without changing the user's selected model.
-**Default** removes only those two context keys and leaves every other setting
-untouched. Existing non-preset values appear as **Custom** and remain unchanged
-until the user explicitly moves the slider.
-All changes apply to `%USERPROFILE%\.codex\config.toml`. A changed mode applies
-to the next new Codex task without restarting the app; a task that is already
-open keeps the configuration snapshot it started with. Before replacing the
-existing file, the widget copies it to
-`config.toml.codex-usage-widget.bak` in the same directory.
+### Configuration safety
 
-If `config.toml` selects a custom `model_catalog_json`, the widget keeps the
-`gpt-5.6-sol` `max_context_window` ceiling at 1,000,000. Codex caches custom
-catalogs when its backend starts, so the first expansion of an older catalog
-requires one restart; after that, switching modes applies live to new tasks.
-The widget saves the unmodified catalog once as
-`<catalog>.codex-usage-widget.bak`. **Default** removes the two TOML context
-overrides, so the original `context_window` and standard compaction remain
-active even though the harmless 1M ceiling stays available. Other model
-definitions and catalog fields are preserved.
+- The slider preserves your selected Codex model.
+- It changes only **model_context_window** and **model_auto_compact_token_limit**.
+- **Default** removes only those two overrides and leaves unrelated settings untouched.
+- A non-preset pair is shown as **CUSTOM** and stays unchanged until you deliberately move the slider.
+- Existing configuration files are backed up beside the original before replacement.
+
+<details>
+<summary>Advanced: custom model catalogs</summary>
+
+If your Codex configuration uses a custom model catalog, the widget maintains a 1M maximum context ceiling for gpt-5.6-sol and creates a one-time backup of that catalog. This allows later slider changes to apply to new tasks without repeatedly expanding the catalog. The first expansion of an older catalog can require one Codex restart.
+
+</details>
 
 ## Start automatically with Windows
 
-Double-click `Install Automatic Startup.vbs`. It creates a shortcut for the
-current Windows account and starts the widget about 15 seconds after sign-in so
-Windows Explorer and the taskbar have time to initialize.
+Double-click **Install Automatic Startup.vbs** to create a shortcut for the current Windows account. The widget starts about 15 seconds after sign-in so Windows Explorer and the taskbar have time to initialize.
 
-Alternatively, run `Install Taskbar Startup.ps1` to register the delayed
-launcher under the current user's Windows Run key.
+Alternatively, run **Install Taskbar Startup.ps1** to create the current-user delayed startup entry. Run **Uninstall Taskbar Startup.ps1** to remove both current and legacy startup entries.
 
-Run `Uninstall Taskbar Startup.ps1` to remove both current and legacy startup
-entries.
+## Privacy and local files
 
-## Privacy
+The widget reads usage events only from:
 
-The widget reads usage events from the known local Codex session location:
+    %USERPROFILE%\.codex\sessions
 
-```text
-%USERPROFILE%\.codex\sessions
-```
+Its position, animation, and refresh preferences are stored in:
 
-When you move the work-mode slider, it writes only the three documented
-model/context keys in the user-level Codex configuration file. If that file
-selects a custom model catalog, the widget updates only the
-`gpt-5.6-sol.max_context_window` field as described above.
+    %APPDATA%\CodexUsageWidget\widget-state.json
 
-It does not send usage data to the internet. Position, animation, and refresh
-settings are stored in:
+The context slider writes only its documented overrides to:
 
-```text
-%APPDATA%\CodexUsageWidget\widget-state.json
-```
+    %USERPROFILE%\.codex\config.toml
 
-Diagnostic logs are stored in the same folder and never include conversation
-text, API keys, cookies, or credentials.
+Diagnostic logs live beside the widget state. They do not include conversation text, API keys, cookies, or credentials.
+
+## Troubleshooting
+
+| Situation | What to check |
+| --- | --- |
+| The widget shows --% | Start or use Codex so a local session event exists, then choose **Refresh usage**. |
+| The percentage does not change | Check the tooltip: the widget may have refreshed successfully while Codex has no newer rate-limit event. |
+| The 5-hour value is -- | Codex did not include a short-window rate limit in that event. |
+| The slider shows CUSTOM | Your existing context values do not exactly match a preset. Nothing is written until you move the slider. |
+| A mode change is not visible in an open task | Start a new Codex task; existing tasks keep their original configuration snapshot. |
+| The taskbar restarted | The widget attempts to reattach automatically. If needed, restart the widget. |
 
 ## Build from source
 
@@ -111,44 +130,23 @@ Requirements:
 - Windows 10/11 x64
 - .NET 8 SDK
 
-```powershell
-dotnet restore src\CodexUsageWidget\CodexUsageWidget.csproj --configfile NuGet.Config
-dotnet publish src\CodexUsageWidget\CodexUsageWidget.csproj -c Release -o publish\single
-```
+    dotnet restore src\CodexUsageWidget\CodexUsageWidget.csproj --configfile NuGet.Config
+    dotnet test tests\CodexUsageWidget.Tests\CodexUsageWidget.Tests.csproj -c Release
+    dotnet publish src\CodexUsageWidget\CodexUsageWidget.csproj -c Release -o publish\single
 
-The published self-contained executable is written to:
+The self-contained executable is written to:
 
-```text
-publish\single\CodexTaskbarWidget.exe
-```
+    publish\single\CodexTaskbarWidget.exe
 
-## Version 2.1.1
+## Project layout
 
-- Selects the newest token_count event across all local Codex sessions.
-- Replaces the two-second session-directory polling loop with file-change monitoring.
-- Makes **Manual only** stop all background usage refreshes.
-- Shows when a manual refresh completed, and distinguishes it from the data timestamp.
-- Adds regression coverage for multi-session selection, missing 5-hour data, and incomplete JSONL records.
+| Path | Purpose |
+| --- | --- |
+| src/CodexUsageWidget | Native C# / .NET 8 WPF application. |
+| tests/CodexUsageWidget.Tests | Regression coverage for configuration and local usage parsing. |
+| screenshots/v2.1.1 | Current screenshots used in this README. |
+| CHANGELOG.md | Version-by-version release notes. |
 
-## Version 2.1.0
+## Contributing
 
-- Added a global four-position Codex context slider, including a non-overriding
-  Default option.
-- Refined the taskbar layout by removing redundant branding and placing the
-  quota percentage directly beside the usage bar.
-- Added atomic global configuration saves and automatic backups.
-- Added a stable custom model-catalog ceiling for restart-free mode changes on
-  new Codex tasks.
-- Added tests for TOML preservation, profile changes, and backups.
-
-## Version 2.0.0
-
-- Rewritten from PowerShell/WPF to native C#/.NET 8 WPF.
-- Replaced the launcher-plus-script package with one self-contained EXE.
-- Preserved the v1.0.8 taskbar layout, quota parsing, reset date, and tooltip.
-- Preserved taskbar embedding, dragging, display presets, refresh settings, and
-  icon animation.
-- Preserved the existing AppData settings format for an in-place upgrade.
-- Updated automatic startup names, logs, documentation, and build metadata.
-
-See `VERSION.txt` for the current build information.
+Bug reports and pull requests are welcome. For UI or behavior changes, include the Windows version, the widget version, clear reproduction steps, and a screenshot when possible.
