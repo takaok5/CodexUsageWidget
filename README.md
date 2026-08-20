@@ -77,16 +77,18 @@ The four-position slider applies a global context profile to new Codex tasks. Ex
 
 ### Configuration safety
 
-- The slider preserves your selected Codex model.
-- It changes only **model_context_window** and **model_auto_compact_token_limit**.
+- The slider never adds, changes, removes, or restores your selected Codex model.
+- It changes only **model_context_window** and **model_auto_compact_token_limit** in `%USERPROFILE%\.codex\config.toml`.
 - **Default** removes only those two overrides and leaves unrelated settings untouched.
 - A non-preset pair is shown as **CUSTOM** and stays unchanged until you deliberately move the slider.
+- Changes apply to the next completely new Codex task; existing, resumed, or previously created tasks keep their original configuration snapshot.
+- A trusted project's `.codex\config.toml` takes priority. Remove its two context keys when that project should inherit the global slider setting.
 - Existing configuration files are backed up beside the original before replacement.
 
 <details>
 <summary>Advanced: custom model catalogs</summary>
 
-If your Codex configuration uses a custom model catalog, the widget maintains a 1M maximum context ceiling for gpt-5.6-sol and creates a one-time backup of that catalog. This allows later slider changes to apply to new tasks without repeatedly expanding the catalog. The first expansion of an older catalog can require one Codex restart.
+If your Codex configuration uses a custom model catalog, the first custom preset preserves each model's `context_window` and sets `max_context_window` to the official 1,050,000-token ceiling for every present GPT-5.6 Sol, Terra, and Luna entry. It also repairs `context_window` from the stable backup if an older widget version changed it. Restart Codex once after this bootstrap; later preset changes update only `config.toml` and apply to completely new tasks without restarting. The original catalog is saved once as `<catalog>.codex-usage-widget.bak`.
 
 </details>
 
@@ -105,6 +107,12 @@ The widget reads usage events only from:
 Its position, animation, and refresh preferences are stored in:
 
     %APPDATA%\CodexUsageWidget\widget-state.json
+
+When you move the work-mode slider, it writes only the two documented context
+keys in the user-level Codex configuration file. During the one-time catalog
+bootstrap, the widget updates only `max_context_window` for GPT-5.6 Sol, Terra,
+and Luna; it also repairs `context_window` from the stable backup if an older
+widget version changed it.
 
 The context slider writes only its documented overrides to:
 
