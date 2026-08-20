@@ -5,25 +5,28 @@ namespace CodexUsageWidget;
 
 internal sealed record RateLimit(double UsedPercent, int WindowMinutes, long? ResetsAt);
 internal sealed record UsageSnapshot(RateLimit Long, RateLimit? Short, DateTimeOffset EventTime);
+internal sealed record CachedSnapshot(DateTime LastWriteTimeUtc, long Length, UsageSnapshot? Snapshot);
 
 internal static class UsageReader
 {
     private const int TailSize = 2 * 1024 * 1024;
+    private static readonly object CacheLock = new();
+    private static readonly Dictionary<string, CachedSnapshot> SnapshotCache =
+        new(StringComparer.OrdinalIgnoreCase);
 
     internal static string SessionRoot => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "sessions");
 
-    internal static UsageSnapshot? GetLatestSnapshot()
+    internal static UsageSnapshot? GetLatestSnapshot(string? sessionRoot = null)
     {
-        if (!Directory.Exists(SessionRoot)) return null;
+        string root = Path.GetFullPath(sessionRoot ?? SessionRoot);
+        if (!Directory.Exists(root)) return null;
 
         FileInfo[] files;
         try
         {
-            files = Directory.EnumerateFiles(SessionRoot, "*.jsonl", SearchOption.AllDirectories)
+            files = Directory.EnumerateFiles(root, "*.jsonl", SearchOption.AllDirectories)
                 .Select(path => new FileInfo(path))
-                .OrderByDescending(file => file.LastWriteTimeUtc)
-                .Take(6)
                 .ToArray();
         }
         catch
@@ -31,28 +34,40 @@ internal static class UsageReader
             return null;
         }
 
-        foreach (FileInfo file in files)
+        lock (CacheLock)
         {
-            UsageSnapshot? snapshot = ReadSnapshot(file);
-            if (snapshot is not null) return snapshot;
-        }
+            var currentPaths = files.Select(file => file.FullName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            string rootPrefix = Path.TrimEndingDirectorySeparator(root) + Path.DirectorySeparatorChar;
+            SnapshotCache.Keys
+                .Where(path => path.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase) && !currentPaths.Contains(path))
+                .ToList()
+                .ForEach(path => SnapshotCache.Remove(path));
 
-        return null;
-    }
+            var snapshots = new List<UsageSnapshot>(files.Length);
+            foreach (FileInfo file in files)
+            {
+                try
+                {
+                    if (!SnapshotCache.TryGetValue(file.FullName, out CachedSnapshot? cached) ||
+                        cached.LastWriteTimeUtc != file.LastWriteTimeUtc || cached.Length != file.Length)
+                    {
+                        cached = new CachedSnapshot(file.LastWriteTimeUtc, file.Length, ReadSnapshot(file));
+                        SnapshotCache[file.FullName] = cached;
+                    }
 
-    internal static DateTime GetLatestWriteTimeUtc()
-    {
-        if (!Directory.Exists(SessionRoot)) return DateTime.MinValue;
-        try
-        {
-            return Directory.EnumerateFiles(SessionRoot, "*.jsonl", SearchOption.AllDirectories)
-                .Select(File.GetLastWriteTimeUtc)
-                .DefaultIfEmpty(DateTime.MinValue)
-                .Max();
-        }
-        catch
-        {
-            return DateTime.MinValue;
+                    if (cached.Snapshot is not null) snapshots.Add(cached.Snapshot);
+                }
+                catch (IOException)
+                {
+                    SnapshotCache.Remove(file.FullName);
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    SnapshotCache.Remove(file.FullName);
+                }
+            }
+
+            return snapshots.OrderByDescending(snapshot => snapshot.EventTime).FirstOrDefault();
         }
     }
 

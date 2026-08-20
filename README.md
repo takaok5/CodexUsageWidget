@@ -15,6 +15,8 @@ allowance visible without opening a usage dashboard.
 - Live, stale, no-data, and Codex-not-running states.
 - Green, amber, red, and gray quota status colors.
 - Refresh intervals of 30 seconds, 2 minutes, 5 minutes, or manual only.
+- Event-driven session updates with cached parsing for lower disk activity.
+- Manual refresh feedback that distinguishes the check time from Codex's data time.
 - Drag positioning, position lock, and display switching.
 - Automatic reattachment after Windows Explorer restarts.
 - Short, four-position Codex work-mode slider embedded directly in the taskbar
@@ -119,6 +121,14 @@ The published self-contained executable is written to:
 ```text
 publish\single\CodexTaskbarWidget.exe
 ```
+
+## Version 2.1.1
+
+- Selects the newest token_count event across all local Codex sessions.
+- Replaces the two-second session-directory polling loop with file-change monitoring.
+- Makes **Manual only** stop all background usage refreshes.
+- Shows when a manual refresh completed, and distinguishes it from the data timestamp.
+- Adds regression coverage for multi-session selection, missing 5-hour data, and incomplete JSONL records.
 
 ## Version 2.1.0
 
