@@ -227,7 +227,7 @@ public sealed class CodexConfigServiceTests : IDisposable
     }
 
     [Fact]
-    public void CatalogWithoutGpt56DoesNotModifyTomlOrCatalog()
+    public void CatalogWithoutGpt56LeavesCatalogUnchangedAndAppliesConfig()
     {
         string catalogPath = Path.Combine(_testDirectory, "models.json");
         string catalog = "{ \"models\": [{ \"slug\": \"gpt-5.4\", \"max_context_window\": 272000 }] }";
@@ -238,8 +238,11 @@ public sealed class CodexConfigServiceTests : IDisposable
 
         ConfigWriteResult result = CodexConfigService.ApplyToPath(configPath, CodexConfigService.Modes[2]);
 
-        Assert.False(result.Success);
-        Assert.Equal(config, File.ReadAllText(configPath));
+        Assert.True(result.Success, result.Message);
+        string updated = File.ReadAllText(configPath);
+        Assert.Contains("model_context_window = 600000", updated);
+        Assert.Contains("model_auto_compact_token_limit = 500000", updated);
+        Assert.Contains(config.Trim(), updated);
         Assert.Equal(catalog, File.ReadAllText(catalogPath));
     }
 

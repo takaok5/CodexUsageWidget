@@ -158,9 +158,17 @@ public partial class MainWindow : Window
     {
         ContextMode mode = CodexConfigService.Modes[(int)Math.Round(TaskbarModeSlider.Value)];
         if (_loadingContextMode) return;
-        TaskbarModeText.Text = CompactModeLabel(mode);
 
         ConfigWriteResult result = CodexConfigService.ApplyGlobal(mode);
+        if (!result.Success)
+        {
+            ReloadTaskbarContextMode();
+            string currentState = TaskbarModeSlider.ToolTip as string ?? "Current global setting preserved";
+            TaskbarModeSlider.ToolTip = $"{result.Message}\n{currentState}";
+            return;
+        }
+
+        TaskbarModeText.Text = CompactModeLabel(mode);
         UpdateContextToolTip(mode, result.Message);
     }
 

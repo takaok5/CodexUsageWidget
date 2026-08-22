@@ -200,11 +200,7 @@ internal static partial class CodexConfigService
         JsonNode currentRoot = JsonNode.Parse(original)
             ?? throw new JsonException("The custom model catalog is empty.");
         Dictionary<string, JsonObject> currentModels = FindGpt56Models(currentRoot);
-        if (currentModels.Count == 0)
-        {
-            throw new JsonException(
-                "The custom model catalog does not contain a supported GPT-5.6 model.");
-        }
+        if (currentModels.Count == 0) return (original, original);
 
         Dictionary<string, JsonObject> backupModels = [];
         string backupPath = catalogPath + BackupSuffix;
