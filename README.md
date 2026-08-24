@@ -90,11 +90,23 @@ If your Codex configuration uses a custom model catalog, the widget maintains a 
 
 </details>
 
-## Start automatically with Windows
+## Start and stop with Codex
 
-Double-click **Install Automatic Startup.vbs** to create a shortcut for the current Windows account. The widget starts about 15 seconds after sign-in so Windows Explorer and the taskbar have time to initialize.
+Run **Install Codex Watchdog.ps1** once from an extracted release or repository checkout:
 
-Alternatively, run **Install Taskbar Startup.ps1** to create the current-user delayed startup entry. Run **Uninstall Taskbar Startup.ps1** to remove both current and legacy startup entries.
+    powershell -NoProfile -ExecutionPolicy Bypass -File ".\Install Codex Watchdog.ps1"
+
+The installer registers a current-user Scheduled Task triggered by the packaged Codex desktop app event. It does not add anything to Windows sign-in, the Startup folder, or the `HKCU\...\Run` key.
+
+The external watchdog:
+
+- identifies the main Codex desktop process (the packaged executable is currently named `ChatGPT.exe`);
+- starts the repository's original `CodexTaskbarWidget.exe` without arguments or widget-code changes;
+- waits for that exact Codex process to exit;
+- detaches the widget HWND from Explorer, asks it to close normally with `WM_CLOSE`, and waits for it to exit;
+- if the widget UI is blocked, terminates only the detached widget process; it never terminates a window while it is still parented to the taskbar.
+
+Diagnostics are written to `%APPDATA%\CodexUsageWidget\watchdog.log`. After closing Codex and the widget, run **Uninstall Codex Watchdog.ps1** to remove the task and its copied runtime files without changing the widget executable or preferences. If an older release already installed Windows startup entries, run **Remove Legacy Windows Startup.ps1** once.
 
 ## Privacy and local files
 
@@ -122,6 +134,8 @@ Diagnostic logs live beside the widget state. They do not include conversation t
 | The slider shows CUSTOM | Your existing context values do not exactly match a preset. Nothing is written until you move the slider. |
 | A mode change is not visible in an open task | Start a new Codex task; existing tasks keep their original configuration snapshot. |
 | The taskbar restarted | The widget attempts to reattach automatically. If needed, restart the widget. |
+| The widget does not open with Codex | Confirm the **Codex Usage Widget Watchdog** task is enabled and inspect `%APPDATA%\CodexUsageWidget\watchdog.log`. |
+| The widget remains after Codex closes | Check the log: the watchdog leaves it running only if it cannot first verify that the HWND is detached from the taskbar. |
 
 ## Build from source
 
@@ -144,6 +158,7 @@ The self-contained executable is written to:
 | --- | --- |
 | src/CodexUsageWidget | Native C# / .NET 8 WPF application. |
 | tests/CodexUsageWidget.Tests | Regression coverage for configuration and local usage parsing. |
+| scripts/watch-codex.ps1 | External process watchdog and clean-close implementation. |
 | screenshots/v2.1.1 | Current screenshots used in this README. |
 | CHANGELOG.md | Version-by-version release notes. |
 
