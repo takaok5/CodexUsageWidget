@@ -53,6 +53,10 @@ Use the right-click menu to choose the refresh behavior that fits your workflow.
 
 A refresh can succeed without changing the percentage: Codex may not have written newer rate-limit data yet, and the source may report whole-number percentages.
 
+Usage discovery does not build a cache for every historical session or recursively watch the entire archive. Each refresh inspects at most the 32 most recently modified session files, reads a 64 KB tail from each, and allows a deeper 2 MB fallback only for the four newest files. Updates follow the selected refresh interval or a manual refresh, keeping startup bounded even when the local Codex session archive is very large.
+
+The native window is anchored over the selected taskbar after WPF completes its first render. It remains a top-level window instead of becoming a cross-process child of Explorer, avoiding WPF render deadlocks and unresponsive taskbar clicks on secondary or mixed-DPI displays.
+
 ## Codex context modes
 
 The four-position slider applies a global context profile to new Codex tasks. Existing tasks keep the configuration snapshot with which they started.
@@ -121,7 +125,7 @@ Diagnostic logs live beside the widget state. They do not include conversation t
 | The 5-hour value is -- | Codex did not include a short-window rate limit in that event. |
 | The slider shows CUSTOM | Your existing context values do not exactly match a preset. Nothing is written until you move the slider. |
 | A mode change is not visible in an open task | Start a new Codex task; existing tasks keep their original configuration snapshot. |
-| The taskbar restarted | The widget attempts to reattach automatically. If needed, restart the widget. |
+| The taskbar restarted | The widget recalculates its taskbar anchor automatically. If needed, restart the widget. |
 
 ## Build from source
 

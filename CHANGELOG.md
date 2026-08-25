@@ -2,6 +2,14 @@
 
 All notable changes to ChatGPT Codex Usage Widget are documented here.
 
+## Unreleased
+
+- Removes the process-local snapshot cache that required a cold scan of every historical session.
+- Removes the recursive session-archive watcher; updates now use the configured timer or manual refresh.
+- Limits usage discovery to the 32 most recently modified session files.
+- Uses a 64 KB fast tail with a 2 MB fallback limited to the four newest files.
+- Anchors the widget over the taskbar as a top-level window after the first WPF render, avoiding cross-process WPF child-window deadlocks.
+
 ## 2.1.1 — 2026-08-20
 
 - Selects the newest token_count event across all local Codex sessions.

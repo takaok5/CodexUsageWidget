@@ -21,7 +21,6 @@ public partial class MainWindow : Window
 
     private readonly DispatcherTimer _refreshTimer = new();
     private readonly DispatcherTimer _taskbarTimer = new();
-    private readonly DispatcherTimer _sessionTimer = new();
     private readonly DispatcherTimer _refreshFeedbackTimer = new();
     private readonly string _configDirectory;
     private readonly string _stateFile;
@@ -30,24 +29,24 @@ public partial class MainWindow : Window
     private WidgetState _state = new();
     private nint _windowHandle;
     private nint _taskbarHandle;
-    private bool _isEmbedded;
+    private bool _isAnchoredToTaskbar;
     private bool _isDragging;
     private bool _hiddenForAutoHide;
     private double _screenLeft;
     private double _screenRight = SystemParameters.PrimaryScreenWidth;
     private double _windowTop;
     private double _widgetLeft;
+    private double _logicalWidgetWidth = 279;
     private double _dipPerPixel = 1;
     private int _dragStartX;
     private double _dragStartLeft;
     private string _lastLogMessage = string.Empty;
     private bool _loadingContextMode;
-    private FileSystemWatcher? _sessionWatcher;
-    private bool _sessionRefreshQueued;
 
     public MainWindow()
     {
         InitializeComponent();
+        Opacity = 0;
 
         _configDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CodexUsageWidget");
@@ -56,6 +55,7 @@ public partial class MainWindow : Window
         _logFile = Path.Combine(_configDirectory, "widget-errors.log");
 
         SourceInitialized += OnSourceInitialized;
+        ContentRendered += OnContentRendered;
         Closed += OnClosed;
 
         Root.MouseLeftButtonDown += OnMouseLeftButtonDown;
@@ -64,7 +64,7 @@ public partial class MainWindow : Window
 
         MoveLeftMenu.Click += (_, _) => SetTaskbarPosition(_screenLeft);
         PlaceWeatherMenu.Click += (_, _) => SetTaskbarPosition(_screenLeft + 205);
-        MoveRightMenu.Click += (_, _) => SetTaskbarPosition(_screenRight - Width);
+        MoveRightMenu.Click += (_, _) => SetTaskbarPosition(_screenRight - PhysicalWidgetWidth());
         NextDisplayMenu.Click += (_, _) => MoveToNextDisplay();
         RefreshMenu.Click += (_, _) => RefreshUsage(manualRequest: true);
         TaskbarModeSlider.ValueChanged += (_, _) => ApplyTaskbarContextMode();
@@ -92,16 +92,8 @@ public partial class MainWindow : Window
             if (currentTaskbar != _taskbarHandle)
             {
                 SyncDisplayGeometry();
-                AttachWidgetToTaskbar();
+                AnchorWidgetToTaskbar();
             }
-        };
-        _sessionTimer.Interval = TimeSpan.FromMilliseconds(500);
-        _sessionTimer.Tick += (_, _) =>
-        {
-            _sessionTimer.Stop();
-            if (!_sessionRefreshQueued || _state.RefreshMode == "Manual only") return;
-            _sessionRefreshQueued = false;
-            RefreshUsage();
         };
         _refreshFeedbackTimer.Interval = TimeSpan.FromSeconds(6);
         _refreshFeedbackTimer.Tick += (_, _) =>
@@ -114,28 +106,32 @@ public partial class MainWindow : Window
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         _windowHandle = new WindowInteropHelper(this).Handle;
+        if (double.IsFinite(Width) && Width > 1) _logicalWidgetWidth = Width;
         _dipPerPixel = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice.M11 ?? 1;
         LoadState();
         _widgetLeft = _state.Left;
         ApplyStateToMenus();
         ReloadTaskbarContextMode();
         SetRefreshTimerInterval();
-        ConfigureSessionMonitoring();
         SyncDisplayGeometry();
         SetTaskbarPosition(_widgetLeft);
-        AttachWidgetToTaskbar();
         RefreshUsage();
         _refreshTimer.Start();
         _taskbarTimer.Start();
+    }
+
+    private void OnContentRendered(object? sender, EventArgs e)
+    {
+        ContentRendered -= OnContentRendered;
+        AnchorWidgetToTaskbar();
+        Opacity = 1;
     }
 
     private void OnClosed(object? sender, EventArgs e)
     {
         _refreshTimer.Stop();
         _taskbarTimer.Stop();
-        _sessionTimer.Stop();
         _refreshFeedbackTimer.Stop();
-        _sessionWatcher?.Dispose();
         SaveState();
         System.Windows.Application.Current.Shutdown();
     }
@@ -275,7 +271,6 @@ public partial class MainWindow : Window
         _state.RefreshMode = mode;
         ApplyStateToMenus();
         SetRefreshTimerInterval();
-        ConfigureSessionMonitoring();
         SaveState();
     }
 
@@ -289,48 +284,6 @@ public partial class MainWindow : Window
             _ => 30
         };
         _refreshTimer.Interval = TimeSpan.FromSeconds(seconds);
-    }
-
-    private void ConfigureSessionMonitoring()
-    {
-        _sessionRefreshQueued = false;
-        _sessionTimer.Stop();
-        _sessionWatcher?.Dispose();
-        _sessionWatcher = null;
-        if (_state.RefreshMode == "Manual only" || !Directory.Exists(UsageReader.SessionRoot)) return;
-
-        try
-        {
-            _sessionWatcher = new FileSystemWatcher(UsageReader.SessionRoot, "*.jsonl")
-            {
-                IncludeSubdirectories = true,
-                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
-                EnableRaisingEvents = true
-            };
-            _sessionWatcher.Changed += OnSessionFileChanged;
-            _sessionWatcher.Created += OnSessionFileChanged;
-            _sessionWatcher.Renamed += OnSessionFileRenamed;
-            _sessionWatcher.Error += (_, _) => QueueSessionRefresh();
-        }
-        catch (Exception exception)
-        {
-            WriteLog($"Could not monitor Codex sessions: {exception.Message}");
-        }
-    }
-
-    private void OnSessionFileChanged(object sender, FileSystemEventArgs e) => QueueSessionRefresh();
-
-    private void OnSessionFileRenamed(object sender, RenamedEventArgs e) => QueueSessionRefresh();
-
-    private void QueueSessionRefresh()
-    {
-        Dispatcher.InvokeAsync(() =>
-        {
-            if (_state.RefreshMode == "Manual only") return;
-            _sessionRefreshQueued = true;
-            _sessionTimer.Stop();
-            _sessionTimer.Start();
-        });
     }
 
     private void RefreshUsage(bool manualRequest = false)
@@ -430,9 +383,12 @@ public partial class MainWindow : Window
     {
         if (!_isDragging || e.LeftButton != MouseButtonState.Pressed) return;
         int deltaPixels = System.Windows.Forms.Cursor.Position.X - _dragStartX;
-        double target = _dragStartLeft + deltaPixels * _dipPerPixel;
-        _widgetLeft = Math.Clamp(target, _screenLeft, Math.Max(_screenLeft, _screenRight - Width));
-        if (_isEmbedded) PositionEmbeddedWidget(); else Left = _widgetLeft;
+        double target = _dragStartLeft + deltaPixels;
+        _widgetLeft = Math.Clamp(
+            target,
+            _screenLeft,
+            Math.Max(_screenLeft, _screenRight - PhysicalWidgetWidth()));
+        if (_isAnchoredToTaskbar) PositionAnchoredWidget(); else Left = _widgetLeft * _dipPerPixel;
         e.Handled = true;
     }
 
@@ -456,31 +412,43 @@ public partial class MainWindow : Window
 
     private void SetTaskbarPosition(double left)
     {
-        _widgetLeft = Math.Clamp(left, _screenLeft, Math.Max(_screenLeft, _screenRight - Width));
-        if (_isEmbedded)
+        _widgetLeft = Math.Clamp(
+            left,
+            _screenLeft,
+            Math.Max(_screenLeft, _screenRight - PhysicalWidgetWidth()));
+        if (_isAnchoredToTaskbar)
         {
-            PositionEmbeddedWidget();
+            PositionAnchoredWidget();
         }
         else
         {
-            Left = _widgetLeft;
+            Left = _widgetLeft * _dipPerPixel;
             Top = _windowTop;
         }
         SaveState();
     }
 
-    private void PositionEmbeddedWidget()
+    private double PhysicalWidgetWidth()
     {
-        if (!_isEmbedded || _windowHandle == 0 || _taskbarHandle == 0) return;
-        if (!NativeMethods.GetWindowRect(_taskbarHandle, out NativeMethods.Rect rect)) return;
         double scale = _dipPerPixel > 0 ? _dipPerPixel : 1;
-        int screenLeftPixels = (int)Math.Round(_widgetLeft / scale);
-        int childX = screenLeftPixels - rect.Left;
-        int childWidth = (int)Math.Round(Width / scale);
-        int childHeight = Math.Max(1, rect.Bottom - rect.Top);
+        return _logicalWidgetWidth / scale;
+    }
+
+    private void PositionAnchoredWidget()
+    {
+        if (!_isAnchoredToTaskbar || _windowHandle == 0 || _taskbarHandle == 0) return;
+        if (!NativeMethods.GetWindowRect(_taskbarHandle, out NativeMethods.Rect rect)) return;
+        int widgetX = (int)Math.Round(_widgetLeft);
+        int widgetWidth = (int)Math.Round(PhysicalWidgetWidth());
+        int widgetHeight = Math.Max(1, rect.Bottom - rect.Top);
         NativeMethods.SetWindowPos(
-            _windowHandle, 0, childX, 0, childWidth, childHeight,
-            NativeMethods.SwpNoActivate | NativeMethods.SwpNoZOrder);
+            _windowHandle,
+            NativeMethods.HwndTopmost,
+            widgetX,
+            rect.Top,
+            widgetWidth,
+            widgetHeight,
+            NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
     }
 
     private void SyncDisplayGeometry()
@@ -498,13 +466,16 @@ public partial class MainWindow : Window
         var screen = screens[_state.ScreenIndex];
         var bounds = screen.Bounds;
         var work = screen.WorkingArea;
-        _screenLeft = bounds.Left * _dipPerPixel;
-        _screenRight = bounds.Right * _dipPerPixel;
+        _screenLeft = bounds.Left;
+        _screenRight = bounds.Right;
 
-        if (_isEmbedded)
+        if (_isAnchoredToTaskbar)
         {
-            _widgetLeft = Math.Clamp(_widgetLeft, _screenLeft, Math.Max(_screenLeft, _screenRight - Width));
-            PositionEmbeddedWidget();
+            _widgetLeft = Math.Clamp(
+                _widgetLeft,
+                _screenLeft,
+                Math.Max(_screenLeft, _screenRight - PhysicalWidgetWidth()));
+            PositionAnchoredWidget();
             return;
         }
 
@@ -540,7 +511,10 @@ public partial class MainWindow : Window
 
         Height = targetHeight;
         Top = _windowTop;
-        Left = Math.Clamp(_widgetLeft, _screenLeft, Math.Max(_screenLeft, _screenRight - Width));
+        Left = Math.Clamp(
+            _widgetLeft,
+            _screenLeft,
+            Math.Max(_screenLeft, _screenRight - PhysicalWidgetWidth())) * _dipPerPixel;
     }
 
     private void ShowAfterAutoHide()
@@ -550,28 +524,16 @@ public partial class MainWindow : Window
         _hiddenForAutoHide = false;
     }
 
-    private void AttachWidgetToTaskbar()
+    private void AnchorWidgetToTaskbar()
     {
         if (_windowHandle == 0) return;
         nint taskbar = FindTaskbarForSelectedDisplay();
         if (taskbar == 0) return;
 
-        long style = NativeMethods.GetWindowLongPtr(_windowHandle, NativeMethods.GwlStyle).ToInt64();
-        long childStyle = (style | NativeMethods.WsChild) & ~NativeMethods.WsPopup;
-        NativeMethods.SetWindowLongPtr(_windowHandle, NativeMethods.GwlStyle, new nint(childStyle));
-        NativeMethods.SetParent(_windowHandle, taskbar);
         _taskbarHandle = taskbar;
-        _isEmbedded = NativeMethods.GetParent(_windowHandle) == taskbar;
-        if (_isEmbedded)
-        {
-            Topmost = false;
-            PositionEmbeddedWidget();
-        }
-        else
-        {
-            Topmost = true;
-            WriteLog("Could not embed widget into the Windows taskbar");
-        }
+        _isAnchoredToTaskbar = true;
+        Topmost = true;
+        PositionAnchoredWidget();
     }
 
     private nint FindTaskbarForSelectedDisplay()

@@ -218,6 +218,47 @@ public sealed class CodexConfigServiceTests : IDisposable
         Assert.Null(snapshot.Short);
     }
 
+    [Fact]
+    public void UsageReaderStopsAtTheConfiguredRecentFileLimit()
+    {
+        string olderSession = Path.Combine(_testDirectory, "older-session.jsonl");
+        File.WriteAllText(olderSession, TokenCountLine("2026-08-20T03:00:00Z", 25));
+        File.SetLastWriteTimeUtc(olderSession, DateTime.UtcNow.AddHours(-1));
+
+        for (int index = 0; index < 6; index++)
+        {
+            string recentSession = Path.Combine(_testDirectory, $"recent-{index}.jsonl");
+            File.WriteAllText(recentSession, "{\"payload\":{\"type\":\"other\"}}\n");
+            File.SetLastWriteTimeUtc(recentSession, DateTime.UtcNow.AddSeconds(-index));
+        }
+
+        UsageSnapshot? bounded = UsageReader.GetLatestSnapshot(_testDirectory, maxFilesToInspect: 4);
+        UsageSnapshot? expanded = UsageReader.GetLatestSnapshot(_testDirectory, maxFilesToInspect: 8);
+
+        Assert.Null(bounded);
+        Assert.NotNull(expanded);
+        Assert.Equal(25, expanded.Long.UsedPercent);
+    }
+
+    [Fact]
+    public void UsageReaderDoesNotReuseAPerFileSnapshotCache()
+    {
+        string sessionPath = Path.Combine(_testDirectory, "session.jsonl");
+        File.WriteAllText(sessionPath, TokenCountLine("2026-08-20T03:00:00Z", 40));
+        DateTime originalWriteTime = File.GetLastWriteTimeUtc(sessionPath);
+
+        UsageSnapshot? first = UsageReader.GetLatestSnapshot(_testDirectory);
+
+        File.WriteAllText(sessionPath, TokenCountLine("2026-08-20T04:00:00Z", 10));
+        File.SetLastWriteTimeUtc(sessionPath, originalWriteTime);
+        UsageSnapshot? second = UsageReader.GetLatestSnapshot(_testDirectory);
+
+        Assert.NotNull(first);
+        Assert.NotNull(second);
+        Assert.Equal(40, first.Long.UsedPercent);
+        Assert.Equal(10, second.Long.UsedPercent);
+    }
+
     private static string TokenCountLine(string timestamp, int usedPercent, bool includeShortLimit = true)
     {
         string secondary = includeShortLimit
