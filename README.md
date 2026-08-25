@@ -47,11 +47,15 @@ Use the right-click menu to choose the refresh behavior that fits your workflow.
 
 | Setting | Behavior |
 | --- | --- |
-| 30 seconds | Checks usage frequently and reacts to local session-file changes. |
+| 30 seconds | Checks usage every 30 seconds. |
 | 2 minutes / 5 minutes | Uses less background activity. |
 | Manual only | Refreshes only when you choose **Refresh usage**. |
 
 A refresh can succeed without changing the percentage: Codex may not have written newer rate-limit data yet, and the source may report whole-number percentages.
+
+Usage discovery does not build a cache for every historical session or recursively watch the entire archive. Each refresh inspects at most the 32 most recently modified session files, reads a 64 KB tail from each, and allows a deeper 2 MB fallback only for the four newest files. Updates follow the selected refresh interval or a manual refresh, keeping startup bounded even when the local Codex session archive is very large. A usage refresh never reapplies the saved monitor position; monitor placement remains owned by the watchdog.
+
+The native window is anchored over the selected taskbar after WPF completes its first render. It remains a top-level window instead of becoming a cross-process child of Explorer, avoiding WPF render deadlocks and unresponsive taskbar clicks on secondary or mixed-DPI displays.
 
 ## Codex context modes
 
@@ -77,24 +81,40 @@ The four-position slider applies a global context profile to new Codex tasks. Ex
 
 ### Configuration safety
 
-- The slider preserves your selected Codex model.
-- It changes only **model_context_window** and **model_auto_compact_token_limit**.
+- The slider never adds, changes, removes, or restores your selected Codex model.
+- It changes only **model_context_window** and **model_auto_compact_token_limit** in `%USERPROFILE%\.codex\config.toml`.
 - **Default** removes only those two overrides and leaves unrelated settings untouched.
 - A non-preset pair is shown as **CUSTOM** and stays unchanged until you deliberately move the slider.
+- Changes apply to the next completely new Codex task; existing, resumed, or previously created tasks keep their original configuration snapshot.
+- A trusted project's `.codex\config.toml` takes priority. Remove its two context keys when that project should inherit the global slider setting.
 - Existing configuration files are backed up beside the original before replacement.
 
 <details>
 <summary>Advanced: custom model catalogs</summary>
 
-If your Codex configuration uses a custom model catalog, the widget maintains a 1M maximum context ceiling for gpt-5.6-sol and creates a one-time backup of that catalog. This allows later slider changes to apply to new tasks without repeatedly expanding the catalog. The first expansion of an older catalog can require one Codex restart.
+If your Codex configuration uses a custom model catalog, the first custom preset preserves each model's `context_window` and sets `max_context_window` to the official 1,050,000-token ceiling for every present GPT-5.6 Sol, Terra, and Luna entry. It also repairs `context_window` from the stable backup if an older widget version changed it. Restart Codex once after this bootstrap; later preset changes update only `config.toml` and apply to completely new tasks without restarting. The original catalog is saved once as `<catalog>.codex-usage-widget.bak`.
 
 </details>
 
-## Start automatically with Windows
+## Start and stop with Codex
 
-Double-click **Install Automatic Startup.vbs** to create a shortcut for the current Windows account. The widget starts about 15 seconds after sign-in so Windows Explorer and the taskbar have time to initialize.
+Run **Install Codex Watchdog.ps1** once from an extracted release or repository checkout:
 
-Alternatively, run **Install Taskbar Startup.ps1** to create the current-user delayed startup entry. Run **Uninstall Taskbar Startup.ps1** to remove both current and legacy startup entries.
+    powershell -NoProfile -ExecutionPolicy Bypass -File ".\Install Codex Watchdog.ps1"
+
+The installer registers a current-user Scheduled Task triggered by the packaged Codex desktop app event. It does not add anything to Windows sign-in, the Startup folder, or the `HKCU\...\Run` key.
+
+The external watchdog:
+
+- identifies the main Codex desktop process (the packaged executable is currently named `ChatGPT.exe`);
+- starts the bundled `CodexTaskbarWidget.exe` without lifecycle arguments;
+- tracks the largest visible Codex window and moves a top-level widget to the corresponding monitor taskbar while preserving its horizontal offset;
+- reasserts the widget's topmost z-order without moving or resizing it while the monitor is already correct;
+- waits for that exact Codex process to exit;
+- asks the widget to close normally with `WM_CLOSE` and waits for it to exit;
+- retains a guarded fallback that never terminates a widget while it is still parented to Explorer.
+
+Diagnostics are written to `%APPDATA%\CodexUsageWidget\watchdog.log`. After closing Codex and the widget, run **Uninstall Codex Watchdog.ps1** to remove the task and its copied runtime files without changing the widget executable or preferences. The installer removes known Startup-folder and Run-key entries from older releases.
 
 ## Privacy and local files
 
@@ -106,9 +126,14 @@ Its position, animation, and refresh preferences are stored in:
 
     %APPDATA%\CodexUsageWidget\widget-state.json
 
-The context slider writes only its documented overrides to:
+When you move the work-mode slider, it writes only the two documented context
+keys to:
 
     %USERPROFILE%\.codex\config.toml
+
+During the one-time catalog bootstrap, the widget updates only
+`max_context_window` for GPT-5.6 Sol, Terra, and Luna; it also repairs
+`context_window` from the stable backup if an older widget version changed it.
 
 Diagnostic logs live beside the widget state. They do not include conversation text, API keys, cookies, or credentials.
 
@@ -121,7 +146,9 @@ Diagnostic logs live beside the widget state. They do not include conversation t
 | The 5-hour value is -- | Codex did not include a short-window rate limit in that event. |
 | The slider shows CUSTOM | Your existing context values do not exactly match a preset. Nothing is written until you move the slider. |
 | A mode change is not visible in an open task | Start a new Codex task; existing tasks keep their original configuration snapshot. |
-| The taskbar restarted | The widget attempts to reattach automatically. If needed, restart the widget. |
+| The taskbar restarted | The widget recalculates its taskbar anchor automatically. If needed, restart the widget. |
+| The widget does not open with Codex | Confirm the **Codex Usage Widget Watchdog** task is enabled and inspect `%APPDATA%\CodexUsageWidget\watchdog.log`. |
+| The widget remains after Codex closes | Check the log: the watchdog leaves it running only if a safe top-level shutdown cannot be verified. |
 
 ## Build from source
 
@@ -144,6 +171,7 @@ The self-contained executable is written to:
 | --- | --- |
 | src/CodexUsageWidget | Native C# / .NET 8 WPF application. |
 | tests/CodexUsageWidget.Tests | Regression coverage for configuration and local usage parsing. |
+| scripts/watch-codex.ps1 | External lifecycle, monitor-follow, and clean-close watchdog. |
 | screenshots/v2.1.1 | Current screenshots used in this README. |
 | CHANGELOG.md | Version-by-version release notes. |
 

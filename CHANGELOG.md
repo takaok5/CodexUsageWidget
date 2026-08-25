@@ -2,6 +2,21 @@
 
 All notable changes to ChatGPT Codex Usage Widget are documented here.
 
+## Unreleased
+
+- Removes the process-local snapshot cache that required a cold scan of every historical session.
+- Removes the recursive session-archive watcher; updates now use the configured timer or manual refresh.
+- Limits usage discovery to the 32 most recently modified session files.
+- Uses a 64 KB fast tail with a 2 MB fallback limited to the four newest files.
+- Anchors the widget over the taskbar as a top-level window after the first WPF render, avoiding cross-process WPF child-window deadlocks.
+- Replaces Windows sign-in startup with a current-user task triggered by the packaged Codex desktop app event.
+- Adds an external watchdog that starts the bundled widget only while the main Codex process is active.
+- Follows the monitor containing the main Codex window and moves the top-level widget to that monitor's taskbar.
+- Keeps usage refreshes from reapplying a stale saved monitor while the watchdog owns placement.
+- Reasserts only the widget z-order while it is already aligned, preventing the topmost taskbar from covering it without causing monitor jumps.
+- Requests a normal shutdown with `WM_CLOSE`; the guarded fallback never terminates a widget while it is parented to Explorer.
+- Removes legacy Windows Startup entries during watchdog installation and includes a dedicated watchdog uninstaller.
+
 ## 2.1.1 — 2026-08-20
 
 - Selects the newest token_count event across all local Codex sessions.
