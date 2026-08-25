@@ -6,6 +6,7 @@ All notable changes to ChatGPT Codex Usage Widget are documented here.
 
 - Replaces Windows sign-in startup with a current-user task triggered by the packaged Codex desktop app event.
 - Adds an external watchdog that starts the unchanged widget only while the main Codex process is active.
+- Follows the monitor containing the main Codex window and moves the top-level widget to that monitor's taskbar.
 - Detaches the widget HWND from Explorer and requests a normal shutdown with `WM_CLOSE`; a blocked widget is terminated only after the watchdog verifies that it is no longer parented to the taskbar.
 - Removes the legacy Windows Startup installers and includes one-time cleanup and watchdog uninstall scripts.
 

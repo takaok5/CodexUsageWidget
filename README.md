@@ -102,6 +102,7 @@ The external watchdog:
 
 - identifies the main Codex desktop process (the packaged executable is currently named `ChatGPT.exe`);
 - starts the repository's original `CodexTaskbarWidget.exe` without arguments or widget-code changes;
+- tracks the largest visible Codex window and moves a top-level widget to the corresponding monitor taskbar while preserving its horizontal offset;
 - waits for that exact Codex process to exit;
 - detaches the widget HWND from Explorer, asks it to close normally with `WM_CLOSE`, and waits for it to exit;
 - if the widget UI is blocked, terminates only the detached widget process; it never terminates a window while it is still parented to the taskbar.
@@ -158,7 +159,7 @@ The self-contained executable is written to:
 | --- | --- |
 | src/CodexUsageWidget | Native C# / .NET 8 WPF application. |
 | tests/CodexUsageWidget.Tests | Regression coverage for configuration and local usage parsing. |
-| scripts/watch-codex.ps1 | External process watchdog and clean-close implementation. |
+| scripts/watch-codex.ps1 | External lifecycle, monitor-follow, and clean-close watchdog. |
 | screenshots/v2.1.1 | Current screenshots used in this README. |
 | CHANGELOG.md | Version-by-version release notes. |
 
