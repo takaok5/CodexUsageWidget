@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 
 namespace CodexUsageWidget;
@@ -15,6 +16,7 @@ public partial class MainWindow : Window
     private static readonly SolidColorBrush GreenBrush = Brush("#FF70D88B");
     private static readonly SolidColorBrush AmberBrush = Brush("#FFF59E0B");
     private static readonly SolidColorBrush RedBrush = Brush("#FFEF4444");
+    private static readonly SolidColorBrush BlueBrush = Brush("#FF5BAEFF");
     private static readonly SolidColorBrush GrayBrush = Brush("#FF777777");
     private static readonly SolidColorBrush TextBrush = Brush("#FFF3F3F3");
     private static readonly SolidColorBrush MutedTextBrush = Brush("#FFAAAAAA");
@@ -41,7 +43,7 @@ public partial class MainWindow : Window
     private int _dragStartX;
     private double _dragStartLeft;
     private string _lastLogMessage = string.Empty;
-    private bool _loadingContextMode;
+    private DateTimeOffset? _lastPulsedEventTime;
     private FileSystemWatcher? _sessionWatcher;
     private bool _sessionRefreshQueued;
 
@@ -67,7 +69,10 @@ public partial class MainWindow : Window
         MoveRightMenu.Click += (_, _) => SetTaskbarPosition(_screenRight - Width);
         NextDisplayMenu.Click += (_, _) => MoveToNextDisplay();
         RefreshMenu.Click += (_, _) => RefreshUsage(manualRequest: true);
-        TaskbarModeSlider.ValueChanged += (_, _) => ApplyTaskbarContextMode();
+        ContextDefaultMenu.Click += (_, _) => ApplyContextMode(0);
+        Context300KMenu.Click += (_, _) => ApplyContextMode(1);
+        Context600KMenu.Click += (_, _) => ApplyContextMode(2);
+        Context1MMenu.Click += (_, _) => ApplyContextMode(3);
         Refresh30Menu.Click += (_, _) => SetRefreshMode("30 seconds");
         Refresh2MinuteMenu.Click += (_, _) => SetRefreshMode("2 minutes");
         Refresh5MinuteMenu.Click += (_, _) => SetRefreshMode("5 minutes");
@@ -118,7 +123,7 @@ public partial class MainWindow : Window
         LoadState();
         _widgetLeft = _state.Left;
         ApplyStateToMenus();
-        ReloadTaskbarContextMode();
+        ReloadContextModeMenu();
         SetRefreshTimerInterval();
         ConfigureSessionMonitoring();
         SyncDisplayGeometry();
@@ -140,34 +145,32 @@ public partial class MainWindow : Window
         System.Windows.Application.Current.Shutdown();
     }
 
-    private void ReloadTaskbarContextMode()
+    private void ReloadContextModeMenu()
     {
         ContextConfigState state = CodexConfigService.ReadState(CodexConfigService.GlobalConfigPath);
-        _loadingContextMode = true;
-        TaskbarModeSlider.Value = state.IsCustom ? CustomSliderPosition(state) : state.Mode!.Index;
-        TaskbarModeText.Text = state.IsCustom ? "CUSTOM" : CompactModeLabel(state.Mode!);
-        TaskbarModeSlider.IsEnabled = true;
-        _loadingContextMode = false;
+        ContextDefaultMenu.IsChecked = state.Mode?.Index == 0;
+        Context300KMenu.IsChecked = state.Mode?.Index == 1;
+        Context600KMenu.IsChecked = state.Mode?.Index == 2;
+        Context1MMenu.IsChecked = state.Mode?.Index == 3;
         if (state.IsCustom)
             UpdateCustomContextToolTip(state);
         else
             UpdateContextToolTip(state.Mode!);
     }
 
-    private void ApplyTaskbarContextMode()
+    private void ApplyContextMode(int index)
     {
-        ContextMode mode = CodexConfigService.Modes[(int)Math.Round(TaskbarModeSlider.Value)];
-        if (_loadingContextMode) return;
-        TaskbarModeText.Text = CompactModeLabel(mode);
-
+        ContextMode mode = CodexConfigService.Modes[index];
         ConfigWriteResult result = CodexConfigService.ApplyGlobal(mode);
-        UpdateContextToolTip(mode, result.Message);
+        ReloadContextModeMenu();
+        ContextModeMenu.ToolTip = result.Message;
     }
 
     private void UpdateContextToolTip(ContextMode mode, string? resultMessage = null)
     {
         string summary = $"{mode.Name} · {mode.ContextLabel} · Global Codex setting";
-        TaskbarModeSlider.ToolTip = resultMessage is null ? summary : $"{resultMessage}\n{summary}";
+        ContextModeMenu.Header = $"Context mode ({CompactModeLabel(mode)})";
+        ContextModeMenu.ToolTip = resultMessage is null ? summary : $"{resultMessage}\n{summary}";
     }
 
     private void UpdateCustomContextToolTip(ContextConfigState state)
@@ -175,22 +178,9 @@ public partial class MainWindow : Window
         string detail = state.ReadFailed
             ? "Could not read the current context settings"
             : $"{FormatTokenCount(state.ContextWindow)} context · {FormatTokenCount(state.CompactLimit)} auto-compaction";
-        TaskbarModeSlider.ToolTip =
-            $"Custom · {detail} · config.toml is preserved until you move the slider";
-    }
-
-    private static double CustomSliderPosition(ContextConfigState state)
-    {
-        if (state.ContextWindow is null) return 0.5;
-
-        ContextMode nearest = CodexConfigService.Modes
-            .Where(mode => !mode.IsDefault)
-            .OrderBy(mode => Math.Abs((long)mode.ContextWindow!.Value - state.ContextWindow.Value) +
-                             (state.CompactLimit is null
-                                 ? 0
-                                 : Math.Abs((long)mode.CompactLimit!.Value - state.CompactLimit.Value) / 2))
-            .First();
-        return nearest.Index >= 3 ? 2.5 : nearest.Index + 0.5;
+        ContextModeMenu.Header = "Context mode (Custom)";
+        ContextModeMenu.ToolTip =
+            $"Custom · {detail} · config.toml is preserved until you select a preset";
     }
 
     private static string FormatTokenCount(int? value)
@@ -340,8 +330,11 @@ public partial class MainWindow : Window
         if (snapshot is null)
         {
             PercentText.Text = "--%";
-            TimeText.Text = "Weekly Reset unavailable";
+            TimeText.Text = "WEEKLY · Unavailable";
             RemainingBar.Width = 0;
+            RemainingBar.Background = GrayBrush;
+            PercentText.Foreground = MutedTextBrush;
+            SetShortUsageUnavailable();
             Root.ToolTip = "ChatGPT Codex - No usage data found";
             WriteLog("No Codex usage data found");
             if (manualRequest) ShowRefreshFeedback(checkedAt, hasUsageData: false);
@@ -350,7 +343,7 @@ public partial class MainWindow : Window
 
         double left = Math.Clamp(Math.Round(100 - snapshot.Long.UsedPercent), 0, 100);
         PercentText.Text = $"{left:0}%";
-        RemainingBar.Width = 108 * left / 100;
+        RemainingBar.Width = 112 * left / 100;
 
         TimeSpan age = DateTimeOffset.Now - snapshot.EventTime;
         bool stale = age.TotalMinutes > 5;
@@ -366,32 +359,79 @@ public partial class MainWindow : Window
             PercentText.Foreground = TextBrush;
         }
 
-        double? shortLeft = snapshot.Short is null
-            ? null
-            : Math.Clamp(Math.Round(100 - snapshot.Short.UsedPercent), 0, 100);
-        string shortText = shortLeft is null ? "--" : shortLeft.Value.ToString("0", CultureInfo.InvariantCulture);
-        string resetText = "reset unavailable";
+        string resetText = FormatResetCountdown(snapshot.Long.ResetsAt);
         if (snapshot.Long.ResetsAt is long resetUnix)
         {
             DateTimeOffset reset = DateTimeOffset.FromUnixTimeSeconds(resetUnix).ToLocalTime();
-            TimeSpan remaining = reset - DateTimeOffset.Now;
-            resetText = remaining.TotalSeconds <= 0
-                ? "ready to reset"
-                : remaining.TotalDays >= 1
-                    ? $"in {Math.Floor(remaining.TotalDays):0}d {remaining.Hours}h"
-                    : $"in {Math.Floor(remaining.TotalHours):0}h {remaining.Minutes}m";
-            TimeText.Text = $"Weekly Resets {reset.ToString("MMM d", CultureInfo.InvariantCulture)}";
+            TimeText.Text = $"WEEKLY · Resets {reset.ToString("MMM d", CultureInfo.InvariantCulture)}";
         }
         else
         {
-            TimeText.Text = "Weekly Reset unavailable";
+            TimeText.Text = "WEEKLY · Reset unavailable";
         }
 
-        string tooltip = $"ChatGPT Codex - 7D {left:0}% left; 5H {shortText}% left; {resetText}; " +
+        double? shortLeft = UpdateShortUsage(snapshot.Short, stale);
+        string shortText = shortLeft is null ? "--" : shortLeft.Value.ToString("0", CultureInfo.InvariantCulture);
+        string shortResetText = snapshot.Short is null ? "unavailable" : FormatResetCountdown(snapshot.Short.ResetsAt);
+        string tooltip = $"ChatGPT Codex - 7D {left:0}% left; resets {resetText}; 5H {shortText}% left; resets {shortResetText}; " +
                          $"{freshness}; Codex data {snapshot.EventTime:HH:mm:ss}; checked {checkedAt:HH:mm:ss}";
         if (!IsCodexRunning()) tooltip += "; Codex is not running";
         Root.ToolTip = tooltip;
+        PulseStatusForNewEvent(snapshot.EventTime);
         if (manualRequest) ShowRefreshFeedback(checkedAt, hasUsageData: true);
+    }
+
+    private double? UpdateShortUsage(RateLimit? shortLimit, bool stale)
+    {
+        if (shortLimit is null)
+        {
+            SetShortUsageUnavailable();
+            return null;
+        }
+
+        double left = Math.Clamp(Math.Round(100 - shortLimit.UsedPercent), 0, 100);
+        ShortPercentText.Text = $"{left:0}%";
+        ShortRemainingBar.Width = 126 * left / 100;
+        ShortTimeText.Text = $"5 HOURS · {FormatResetCountdown(shortLimit.ResetsAt)}";
+        if (stale)
+        {
+            ShortRemainingBar.Background = GrayBrush;
+            ShortPercentText.Foreground = MutedTextBrush;
+        }
+        else
+        {
+            ShortRemainingBar.Background = left <= 10 ? RedBrush : left <= 30 ? AmberBrush : BlueBrush;
+            ShortPercentText.Foreground = TextBrush;
+        }
+        return left;
+    }
+
+    private void SetShortUsageUnavailable()
+    {
+        ShortTimeText.Text = "5 HOURS · Unavailable";
+        ShortPercentText.Text = "--%";
+        ShortPercentText.Foreground = MutedTextBrush;
+        ShortRemainingBar.Width = 0;
+        ShortRemainingBar.Background = GrayBrush;
+    }
+
+    private static string FormatResetCountdown(long? resetUnix)
+    {
+        if (resetUnix is not long value) return "Reset unavailable";
+        TimeSpan remaining = DateTimeOffset.FromUnixTimeSeconds(value).ToLocalTime() - DateTimeOffset.Now;
+        if (remaining.TotalSeconds <= 0) return "Ready to reset";
+        return remaining.TotalDays >= 1
+            ? $"Resets in {Math.Floor(remaining.TotalDays):0}d {remaining.Hours}h"
+            : $"Resets in {Math.Floor(remaining.TotalHours):0}h {remaining.Minutes}m";
+    }
+
+    private void PulseStatusForNewEvent(DateTimeOffset eventTime)
+    {
+        if (_lastPulsedEventTime == eventTime) return;
+        _lastPulsedEventTime = eventTime;
+        StatusPulse.BeginAnimation(
+            UIElement.OpacityProperty,
+            new DoubleAnimation(0.72, 0, TimeSpan.FromMilliseconds(760)) { AutoReverse = false });
     }
 
     private void ShowRefreshFeedback(DateTimeOffset checkedAt, bool hasUsageData)

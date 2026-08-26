@@ -17,15 +17,17 @@
   <img alt="Local-first" src="https://img.shields.io/badge/Data-local--first-2EA44F">
 </p>
 
-![ChatGPT Codex Usage Widget on the Windows taskbar](screenshots/v2.1.1/context-mode-default.png)
+![ChatGPT Codex Usage Widget showing weekly and 5-hour remaining quota on the Windows taskbar](screenshots/v2.1.2/usage-overview.png)
 
 ## Start in under a minute
 
 1. Download and extract the latest Windows x64 ZIP from [Releases](https://github.com/anekhirun/CodexUsageWidget/releases/latest).
 2. Double-click **CodexTaskbarWidget.exe**.
-3. Right-click the widget to refresh usage, choose a refresh interval, move it, lock it, or exit.
+3. Right-click the widget to refresh usage, choose a refresh interval or context mode, move it, lock it, or exit.
 
 No administrator access, API key, browser cookie, or .NET installation is required.
+
+![Widget right-click menu](screenshots/v2.1.2/context-menu.png)
 
 ## What the widget shows
 
@@ -33,9 +35,10 @@ No administrator access, API key, browser cookie, or .NET installation is requir
 | --- | --- |
 | Weekly remaining | Remaining quota from the current long-window Codex rate limit. |
 | Reset date | The next reset date when Codex provides it. |
-| 5-hour remaining | Available in the tooltip when Codex supplies a short-window limit. |
+| 5-hour remaining | Displayed beside Weekly when Codex supplies a short-window limit; otherwise it shows unavailable. |
 | Freshness | The tooltip separates the latest Codex data time from the time the widget last checked it. |
-| Status color | Green, amber, red, or gray indicates healthy, lower, critical, or stale data. |
+| Status icon | The leftmost ChatGPT icon pulses when Codex writes a newer usage event. |
+| Status color | Green, blue, amber, red, or gray indicates healthy, lower, critical, or stale data. |
 
 The widget reads local Codex session events. It does not call a usage API or send your usage data anywhere.
 
@@ -43,7 +46,7 @@ The widget reads local Codex session events. It does not call a usage API or sen
 
 Use the right-click menu to choose the refresh behavior that fits your workflow.
 
-![Refresh interval menu](screenshots/v2.1.1/refresh-interval-menu.png)
+![Refresh interval menu](screenshots/v2.1.2/refresh-interval-menu.png)
 
 | Setting | Behavior |
 | --- | --- |
@@ -55,18 +58,9 @@ A refresh can succeed without changing the percentage: Codex may not have writte
 
 ## Codex context modes
 
-The four-position slider applies a global context profile to new Codex tasks. Existing tasks keep the configuration snapshot with which they started.
+Choose a context mode from the widget's right-click menu. The selected profile applies to new Codex tasks; existing tasks keep the configuration snapshot with which they started.
 
-<table>
-  <tr>
-    <td align="center"><strong>Default</strong><br><img src="screenshots/v2.1.1/context-mode-default.png" alt="Default context mode" width="360"></td>
-    <td align="center"><strong>Balanced · 300K</strong><br><img src="screenshots/v2.1.1/context-mode-300k.png" alt="Balanced 300K context mode" width="360"></td>
-  </tr>
-  <tr>
-    <td align="center"><strong>Large Codebase · 600K</strong><br><img src="screenshots/v2.1.1/context-mode-600k.png" alt="Large Codebase 600K context mode" width="360"></td>
-    <td align="center"><strong>Long-Running Investigation · 1M</strong><br><img src="screenshots/v2.1.1/context-mode-1m.png" alt="Long-Running Investigation 1M context mode" width="360"></td>
-  </tr>
-</table>
+![Context mode submenu](screenshots/v2.1.2/context-mode-menu.png)
 
 | Mode | Context window | Auto-compaction | Best for |
 | --- | ---: | ---: | --- |
@@ -77,16 +71,16 @@ The four-position slider applies a global context profile to new Codex tasks. Ex
 
 ### Configuration safety
 
-- The slider preserves your selected Codex model.
+- Selecting a mode preserves your selected Codex model.
 - It changes only **model_context_window** and **model_auto_compact_token_limit**.
 - **Default** removes only those two overrides and leaves unrelated settings untouched.
-- A non-preset pair is shown as **CUSTOM** and stays unchanged until you deliberately move the slider.
+- A non-preset pair is shown as **CUSTOM** in the context menu and stays unchanged until you deliberately select a preset.
 - Existing configuration files are backed up beside the original before replacement.
 
 <details>
 <summary>Advanced: custom model catalogs</summary>
 
-If your Codex configuration uses a custom model catalog, the widget maintains a 1M maximum context ceiling for gpt-5.6-sol and creates a one-time backup of that catalog. This allows later slider changes to apply to new tasks without repeatedly expanding the catalog. The first expansion of an older catalog can require one Codex restart.
+If your Codex configuration uses a custom model catalog, the widget maintains a 1M maximum context ceiling for gpt-5.6-sol and creates a one-time backup of that catalog. This allows later context-mode changes to apply to new tasks without repeatedly expanding the catalog. The first expansion of an older catalog can require one Codex restart.
 
 </details>
 
@@ -106,7 +100,7 @@ Its position, animation, and refresh preferences are stored in:
 
     %APPDATA%\CodexUsageWidget\widget-state.json
 
-The context slider writes only its documented overrides to:
+The context-mode menu writes only its documented overrides to:
 
     %USERPROFILE%\.codex\config.toml
 
@@ -119,7 +113,7 @@ Diagnostic logs live beside the widget state. They do not include conversation t
 | The widget shows --% | Start or use Codex so a local session event exists, then choose **Refresh usage**. |
 | The percentage does not change | Check the tooltip: the widget may have refreshed successfully while Codex has no newer rate-limit event. |
 | The 5-hour value is -- | Codex did not include a short-window rate limit in that event. |
-| The slider shows CUSTOM | Your existing context values do not exactly match a preset. Nothing is written until you move the slider. |
+| Context mode shows CUSTOM | Your existing context values do not exactly match a preset. Nothing is written until you select a preset. |
 | A mode change is not visible in an open task | Start a new Codex task; existing tasks keep their original configuration snapshot. |
 | The taskbar restarted | The widget attempts to reattach automatically. If needed, restart the widget. |
 
@@ -144,7 +138,7 @@ The self-contained executable is written to:
 | --- | --- |
 | src/CodexUsageWidget | Native C# / .NET 8 WPF application. |
 | tests/CodexUsageWidget.Tests | Regression coverage for configuration and local usage parsing. |
-| screenshots/v2.1.1 | Current screenshots used in this README. |
+| screenshots/v2.1.2 | Current screenshots used in this README. |
 | CHANGELOG.md | Version-by-version release notes. |
 
 ## Contributing
