@@ -218,6 +218,21 @@ public sealed class CodexConfigServiceTests : IDisposable
         Assert.Null(snapshot.Short);
     }
 
+    [Fact]
+    public void UsageReaderReturnsTheFiveHourLimitWhenCodexProvidesIt()
+    {
+        string sessionPath = Path.Combine(_testDirectory, "session-with-short-limit.jsonl");
+        File.WriteAllText(sessionPath, TokenCountLine("2026-08-20T04:00:00Z", 25));
+
+        UsageSnapshot? snapshot = UsageReader.GetLatestSnapshot(_testDirectory);
+
+        Assert.NotNull(snapshot);
+        Assert.NotNull(snapshot.Short);
+        Assert.Equal(15, snapshot.Short.UsedPercent);
+        Assert.Equal(300, snapshot.Short.WindowMinutes);
+        Assert.Equal(1_787_200_000, snapshot.Short.ResetsAt);
+    }
+
     private static string TokenCountLine(string timestamp, int usedPercent, bool includeShortLimit = true)
     {
         string secondary = includeShortLimit

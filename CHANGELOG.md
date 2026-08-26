@@ -2,6 +2,13 @@
 
 All notable changes to ChatGPT Codex Usage Widget are documented here.
 
+## 2.1.2 — 2026-08-26
+
+- Moves context-mode selection from the taskbar slider to the right-click menu.
+- Adds a leftmost ChatGPT status icon that pulses when Codex writes a newer usage event.
+- Shows 5-hour remaining quota and its reset countdown beside the weekly quota when Codex supplies the short-window limit.
+- Uses a transparent widget surface so the embedded control adopts the active Windows taskbar color.
+
 ## 2.1.1 — 2026-08-20
 
 - Selects the newest token_count event across all local Codex sessions.
