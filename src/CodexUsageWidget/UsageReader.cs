@@ -137,7 +137,18 @@ internal static class UsageReader
             if (!root.TryGetProperty("payload", out JsonElement payload) ||
                 !payload.TryGetProperty("type", out JsonElement type) ||
                 type.GetString() != "token_count" ||
-                !payload.TryGetProperty("rate_limits", out JsonElement limitsElement))
+                !payload.TryGetProperty("rate_limits", out JsonElement limitsElement) ||
+                limitsElement.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            // Dedicated model pools (for example codex_bengalfox / Spark) are
+            // separate quotas. Their newer events must not replace the main Codex quota.
+            // Older rollouts omitted the ID or recorded null for the main pool.
+            if (limitsElement.TryGetProperty("limit_id", out JsonElement limitId) &&
+                limitId.ValueKind != JsonValueKind.Null &&
+                (limitId.ValueKind != JsonValueKind.String || limitId.GetString() != "codex"))
             {
                 return null;
             }
@@ -147,10 +158,12 @@ internal static class UsageReader
             AddLimit(limitsElement, "secondary", limits);
             if (limits.Count == 0) return null;
 
-            RateLimit longLimit = limits
+            RateLimit? longLimit = limits
                 .Where(limit => limit.WindowMinutes >= 1440)
                 .OrderByDescending(limit => limit.WindowMinutes)
-                .FirstOrDefault() ?? limits.OrderByDescending(limit => limit.WindowMinutes).First();
+                .FirstOrDefault();
+            // A five-hour-only update is not a weekly quota update.
+            if (longLimit is null) return null;
             RateLimit? shortLimit = limits
                 .Where(limit => limit.WindowMinutes < 1440)
                 .OrderBy(limit => limit.WindowMinutes)

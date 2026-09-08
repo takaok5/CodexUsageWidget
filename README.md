@@ -40,7 +40,7 @@ No administrator access, API key, browser cookie, or .NET installation is requir
 | Status icon | The leftmost ChatGPT icon pulses when Codex writes a newer usage event. |
 | Status color | Green, blue, amber, red, or gray indicates healthy, lower, critical, or stale data. |
 
-The widget reads local Codex session events. It does not call a usage API or send your usage data anywhere.
+The widget reads local Codex session events. It does not call a usage API or send your usage data anywhere. The overview uses the main `codex` quota only; separate pools such as GPT-5.3-Codex-Spark cannot replace it. Legacy events without a pool ID remain supported. A five-hour-only event is never presented as weekly quota. Percentages show remaining quota (`100 - used_percent`).
 
 ## Refresh and data freshness
 

@@ -4,6 +4,7 @@ All notable changes to ChatGPT Codex Usage Widget are documented here.
 
 ## 2.1.3 (proposed)
 
+- Ignores separate model quota pools such as Codex Spark when reading the main weekly quota, preventing false 100% remaining readings.
 - Keeps the 2.1.2 overview and adds an optional compact layout with a responsive context slider and full-width blue fill.
 - Preserves intentional custom-catalog context edits even when an older backup differs.
 - Bounds usage-tail reads, skips malformed/incomplete records, and selects the newest valid event inside the configured limits.
